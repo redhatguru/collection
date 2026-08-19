@@ -1,0 +1,9 @@
+---
+- name: Create a PostgreSQL database
+  community.general.postgresql_db:
+    name: "{{ postgresql_database_name }}"
+    state: present
+    encoding: "UTF-8"
+  become: true
+  become_user: postgres
+...

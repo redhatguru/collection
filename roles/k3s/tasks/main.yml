@@ -1,0 +1,6 @@
+---
+- name: Install K3S
+  ansible.builtin.import_tasks:
+    file: install-rancher.yml
+  tags: install
+...

@@ -1,0 +1,84 @@
+---
+# tasks for install and create postgress database
+- name: Install EPEL release
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  become: true
+
+- name: Add repository
+  ansible.builtin.yum_repository:
+    name: epel
+    description: EPEL YUM repo
+    baseurl: https://download.postgresql.org/pub/repos/yum/{{ postgresql_version }}/redhat/rhel-9-x86_64/
+    enabled: true
+    gpgcheck: false
+
+- name: Disable builtin postgresql module
+  ansible.builtin.shell: >
+    dnf -qy module disable postgresql
+  args:
+    executable: /bin/bash
+  register: postgresql_disable_builtin
+  changed_when: postgresql_disable_builtin.rc == 0
+  failed_when: postgresql_disable_builtin.rc != 0
+  ignore_errors: true
+  become: true
+
+- name: Install require packages on EL8 and EL9
+  ansible.builtin.package:
+    name:
+      - python3-pycurl
+      - python3-libselinux
+      - python3-psycopg2
+      - glibc-langpack-en
+      - openssl
+      - python3-psycopg2
+    state: present
+  become: true
+
+- name: Install PostgreSQL {{ postgresql_version }}
+  ansible.builtin.dnf:
+    name: "{{ item }}"
+    state: present
+  become: true
+  loop:
+    - "postgresql{{ postgresql_version }}"
+    - "postgresql{{ postgresql_version }}-server"
+    - "postgresql{{ postgresql_version }}-contrib"
+
+- name: Open firewall port for PostgreSQL
+  ansible.posix.firewalld:
+    service: postgresql
+    permanent: true
+    state: enabled
+    immediate: true
+  become: true
+
+- name: Check if database need too initialized
+  ansible.builtin.stat:
+    path: "/var/lib/pgsql/{{ postgresql_version }}/data/PG_VERSION"
+  register: postgresql_data
+
+- name: Systemctl daemon-reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
+- name: Initialize postgres db
+  ansible.builtin.shell: >
+    /usr/bin/postgresql-{{ postgresql_version }}-setup initdb
+  become: true
+  register: postgresql_init
+  failed_when: "'Data directory is not empty!' in postgresql_init.stdout_lines"
+  ignore_errors: true
+  when: not postgresql_data.stat.exists
+  changed_when: false
+
+- name: Ensure PostgreSQL service is running
+  ansible.builtin.service:
+    name: postgresql-{{ postgresql_version }}
+    state: started
+    enabled: true
+  become: true
+...

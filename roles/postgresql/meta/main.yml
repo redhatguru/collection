@@ -1,0 +1,10 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: postgresql
+  author: Guido Martens
+  description: Install and deploy Postgres
+  license: "license (BSD, MIT)"
+  min_ansible_version: "2.15"
+  galaxy_tags: []

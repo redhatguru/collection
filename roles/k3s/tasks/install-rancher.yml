@@ -1,0 +1,54 @@
+---
+- name: Download K3s install script
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: '0755'
+
+- name: Install K3s without Traefik
+  ansible.builtin.command: /tmp/k3s-install.sh --write-kubeconfig-mode 644
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+  register: k3s_install
+  changed_when: "'[INFO]  systemd: Starting k3s' in k3s_install.stdout"
+  ignore_errors: true
+
+- name: Make sure Firewalld is disabled
+  ansible.builtin.systemd:
+    name: firewalld
+    state: stopped
+    enabled: false
+
+- name: Add Kubernetes repo
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/kubernetes.repo
+    mode: '0644'
+    content: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://pkgs.k8s.io/core:/stable:/{{ k3s_kubernetes_version }}/rpm/
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://pkgs.k8s.io/core:/stable:/{{ k3s_kubernetes_version }}/rpm/repodata/repomd.xml.key
+      exclude=kubelet kubeadm cri-tools kubernetes-cni
+  become: true
+
+- name: Install kubectl
+  ansible.builtin.dnf:
+    name: kubectl
+    state: present
+
+- name: Create ~/.kube directory
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: '0700'
+
+- name: Copy k3s kubeconfig to ~/.kube/config
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_env.USER }}"
+    mode: '0600'
+  become: true

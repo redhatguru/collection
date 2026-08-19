@@ -1,0 +1,12 @@
+---
+# defaults file for postgres
+postgresql_version: "17"
+postgresql_hba: "/var/lib/pgsql/17/data/pg_hba.conf"
+postgresql_conf: "/var/lib/pgsql/17/data/postgresql.conf"
+postgresql_port: "5432"
+postgresql_sslmode: "Disable"
+postgresql_root_password: "dbrootpass"
+postgresql_user: "dbuser"
+postgresql_user_password: "dbuser"
+postgresql_database_name: "awx"
+postgresql_allow_subnet: "0.0.0.0/0"
