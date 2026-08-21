@@ -45,6 +45,7 @@ tags: [tools]
 dependencies:
   community.general: ">=8.0.0"
   community.postgresql: ">=3.0.0"
+  ansible.posix: ">=1.5.0"
 
 # The URL of the originating SCM repository
 repository: https://github.com/redhatguru/collection
