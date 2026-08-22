@@ -1,0 +1,10 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: patching
+  author: Guido Martens
+  description: Update packages on RHEL and Debian based systems, rebooting only when required and allowed
+  license: "license (BSD, MIT)"
+  min_ansible_version: "2.15"
+  galaxy_tags: []

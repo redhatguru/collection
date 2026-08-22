@@ -1,0 +1,16 @@
+---
+- name: Ensure dnf-utils is installed
+  ansible.builtin.dnf:
+    name: dnf-utils
+    state: present
+  become: true
+
+- name: Check if a reboot is required
+  ansible.builtin.command: needs-restarting -r
+  register: patching_needs_restarting
+  changed_when: false
+  failed_when: patching_needs_restarting.rc not in [0, 1]
+
+- name: Set reboot-required fact
+  ansible.builtin.set_fact:
+    patching_needs_reboot: "{{ patching_needs_restarting.rc == 1 }}"

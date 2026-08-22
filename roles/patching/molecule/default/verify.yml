@@ -1,0 +1,27 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Check reboot-required state (RedHat)
+      ansible.builtin.command: needs-restarting -r
+      register: patching_verify_needs_restarting
+      changed_when: false
+      failed_when: false
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Check reboot-required state (Debian)
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: patching_verify_reboot_file
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Assert no reboot is still pending (RedHat)
+      ansible.builtin.assert:
+        that: patching_verify_needs_restarting.rc == 0
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Assert no reboot is still pending (Debian)
+      ansible.builtin.assert:
+        that: not patching_verify_reboot_file.stat.exists
+      when: ansible_facts['os_family'] == 'Debian'

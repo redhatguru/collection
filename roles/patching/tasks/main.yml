@@ -1,0 +1,15 @@
+---
+- name: Update packages
+  ansible.builtin.include_tasks: "update-{{ ansible_facts['os_family'] }}.yml"
+
+- name: Check if a reboot is required
+  ansible.builtin.include_tasks: "check-reboot-{{ ansible_facts['os_family'] }}.yml"
+
+- name: Reboot the system
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ patching_reboot_timeout }}"
+  become: true
+  when:
+    - patching_needs_reboot | default(false)
+    - patching_reboot | bool
+...

@@ -1,0 +1,15 @@
+---
+- name: Ensure update-notifier-common is installed
+  ansible.builtin.apt:
+    name: update-notifier-common
+    state: present
+  become: true
+
+- name: Check for reboot-required flag file
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: patching_reboot_required_file
+
+- name: Set reboot-required fact
+  ansible.builtin.set_fact:
+    patching_needs_reboot: "{{ patching_reboot_required_file.stat.exists }}"
