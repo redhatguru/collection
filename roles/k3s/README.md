@@ -1,28 +1,35 @@
 k3s
 =========
 
-Role to install k3s on a single node. Supports Rocky Linux 9/10 and
-Ubuntu 24.04/26.04.
+Installs a single-node [K3s](https://k3s.io) cluster (without the bundled
+Traefik ingress controller) plus `kubectl`, on Rocky Linux 9/10 or Ubuntu
+24.04/26.04. Sets up the upstream Kubernetes package repository (`dnf`
+repo on RedHat, `apt` repo on Debian) to install `kubectl`, and writes a
+working `~/.kube/config` for the connecting user.
 
-# Requirements
+Requirements
 ------------
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+- A Rocky Linux 9/10 or Ubuntu 24.04/26.04 host, reachable with `become: true`
+  and outbound internet access (to `get.k3s.io` and `pkgs.k8s.io`).
+- `firewalld` is stopped/disabled on RedHat hosts as part of the role; it is
+  skipped on Debian family hosts, which don't ship it by default.
 
-# Role Variables
+### Collections
+
+This role only uses modules built into `ansible-core` (`ansible.builtin.*`),
+so no extra collections need to be installed.
+
+Role Variables
 --------------
 
 Below you can find the default vars used by this role:
-- k3s_version: v1.28.6+k3s2
-- k3s_kubernetes_version: v1.30
+- `k3s_version` (default `v1.28.6+k3s2`) — K3s release to install, passed as
+  `INSTALL_K3S_VERSION` to the upstream install script.
+- `k3s_kubernetes_version` (default `v1.30`) — Kubernetes minor version used
+  to select the `pkgs.k8s.io` repository `kubectl` is installed from.
 
-
-# Dependencies
-------------
-
-No dependencies
-
-# Example Playbook
+Example Playbook
 ----------------
 
 Example playbook:
@@ -36,14 +43,12 @@ Example playbook:
     k3s_kubernetes_version: v1.30
 
   tasks:
-    - name: K3S
+    - name: K3s
       ansible.builtin.include_role:
-        name: K3S
-      when: "'awx-prod' in group_names"
-
+        name: k3s
 ```
 
-# Testing
+Testing
 ------------
 
 This role has a Molecule scenario that runs the role in VirtualBox VMs (via
@@ -72,4 +77,3 @@ Author Information
 ------------------
 
 for questions, Contact guido-_@live.nl
-

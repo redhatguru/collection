@@ -1,62 +1,86 @@
 Postgresql
 =========
 
-This role installs and configures a PostgreSQL database on Rocky Linux 9/10 or
-Ubuntu 24.04/26.04. You can also create users and databases.
+Installs PostgreSQL on Rocky Linux 9/10 or Ubuntu 24.04/26.04, creates a
+database and a user with full privileges on it, and applies some basic
+hardening (`pg_hba.conf` access rule, `listen_addresses`, `postgres`
+superuser password).
+
+The tasks are split into four tags you can run selectively:
+- `install` — install PostgreSQL and start the service
+- `createdb` — create the database
+- `createusr` — create the user and grant it privileges on the database
+- `hardening` — apply the `pg_hba.conf`/`postgresql.conf` and password changes
 
 Requirements
 ------------
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+- A Rocky Linux 9/10 or Ubuntu 24.04/26.04 host, reachable with `become: true`.
+- `python3-psycopg2` gets installed by the role itself, so no manual
+  Python prerequisites are needed on the target.
+
+### Collections
+
+This role needs the following collections on the control node (already
+declared in the collection's own `requirements.yml`/`galaxy.yml`, and in
+this role's own `requirements.yml`):
+- `community.general` (`postgresql_db`, `postgresql_user`)
+- `community.postgresql` (`postgresql_privs`)
+- `ansible.posix` (`firewalld`, RedHat only, skipped inside containers)
+
+Install them with:
+```shell
+ansible-galaxy collection install -r requirements.yml
+```
 
 Role Variables
 --------------
 
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
-
-- postgresql_version: "17"
-- postgresql_hba: computed from postgresql_conf_dir, e.g. "/var/lib/pgsql/17/data/pg_hba.conf" (RedHat) or "/etc/postgresql/17/main/pg_hba.conf" (Debian)
-- postgresql_conf: computed from postgresql_conf_dir, same pattern as postgresql_hba
-- postgresql_port: "5432"
-- postgresql_sslmode: "Disable"
-- postgresql_root_password: "dbrootpass"
-- postgresql_user: "dbuser"
-- postgresql_user_password: "dbuser"
-- postgresql_database_name: "awx"
-- postgresql_allow_subnet: "0.0.0.0/0"
-
+- `postgresql_version` (default `"17"`) — PostgreSQL major version to install.
+- `postgresql_conf_dir` — directory holding `postgresql.conf`/`pg_hba.conf`.
+  Computed automatically from `postgresql_version` and the OS family
+  (`/var/lib/pgsql/<version>/data` on RedHat, `/etc/postgresql/<version>/main`
+  on Debian); override only if your layout differs.
+- `postgresql_hba` — full path to `pg_hba.conf`, derived from `postgresql_conf_dir`.
+- `postgresql_conf` — full path to `postgresql.conf`, derived from `postgresql_conf_dir`.
+- `postgresql_port` (default `"5432"`) — reserved for the PostgreSQL listen
+  port; not currently wired into any task in this role.
+- `postgresql_sslmode` (default `"Disable"`) — reserved for SSL configuration;
+  not currently wired into any task in this role.
+- `postgresql_root_password` (default `"dbrootpass"`) — password set for the
+  `postgres` superuser during hardening.
+- `postgresql_user` (default `"dbuser"`) — name of the application database user to create.
+- `postgresql_user_password` (default `"dbuser"`) — password for `postgresql_user`.
+- `postgresql_database_name` (default `"awx"`) — name of the database to create.
+- `postgresql_allow_subnet` (default `"0.0.0.0/0"`) — CIDR allowed to connect
+  with `md5` auth in `pg_hba.conf`.
 
 Example Playbook
 ----------------
 
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-```YAML
-    ---
-    - name: Deploy Postgress
-      hosts: all
-      become: true
+```yaml
+---
+- name: Deploy PostgreSQL
+  hosts: all
+  become: true
 
-      vars:
-        postgresql_version: "17"
-        postgresql_user: "awx-user"
-        postgresql_user_password: "do7iZNapRTVJXrrnFw"
-        postgresql_database_name: "awx"
-        postgresql_root_password: password
-        postgres_host: "10.0.0.x"
-        postgresql_allow_subnet: "0.0.0.0/0"
-        
+  vars:
+    postgresql_version: "17"
+    postgresql_user: "awx-user"
+    postgresql_user_password: "do7iZNapRTVJXrrnFw"
+    postgresql_database_name: "awx"
+    postgresql_root_password: "password"
+    postgresql_allow_subnet: "10.0.0.0/24"
 
-    tasks:
-
-      - name: Postgress
-        ansible.builtin.include_role:
-          name: postgres
-        tags:
-          - prepare
-          - install
-          - createdb
-          - createusr
-          - hardening
+  tasks:
+    - name: PostgreSQL
+      ansible.builtin.include_role:
+        name: postgresql
+      tags:
+        - install
+        - createdb
+        - createusr
+        - hardening
 ```
 
 Testing

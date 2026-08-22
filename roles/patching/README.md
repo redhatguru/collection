@@ -8,20 +8,28 @@ glibc update) and rebooting has been explicitly allowed.
 # Requirements
 ------------
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+- A Rocky Linux 9/10 or Ubuntu 24.04/26.04 host, reachable with `become: true`.
+- Reboot detection relies on `dnf-utils` (RedHat, provides `needs-restarting`)
+  and `update-notifier-common` (Debian, maintains `/var/run/reboot-required`);
+  the role installs both itself if missing.
+
+### Collections
+
+This role only uses modules built into `ansible-core` (`ansible.builtin.*`),
+so no extra collections need to be installed.
 
 # Role Variables
 --------------
 
 Below you can find the default vars used by this role:
-- patching_reboot: false
-- patching_reboot_timeout: 600
-
-Setting `patching_reboot: true` allows the role to reboot the host, but
-only when a reboot is actually required (checked via `needs-restarting -r`
-on RHEL family hosts, and `/var/run/reboot-required` on Debian family
-hosts). With `patching_reboot: false` (the default), packages are updated
-but the host is never rebooted, even if one is required.
+- `patching_reboot` (default `false`) — allow the role to reboot the host.
+  Even when `true`, a reboot only happens if one is actually required
+  (checked via `needs-restarting -r` on RHEL family hosts, and
+  `/var/run/reboot-required` on Debian family hosts). With the default
+  `false`, packages are updated but the host is never rebooted, even if
+  one is required.
+- `patching_reboot_timeout` (default `600`) — seconds to wait for the host
+  to come back up after a reboot, passed to `ansible.builtin.reboot`.
 
 # Dependencies
 ------------
