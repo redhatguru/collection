@@ -1,8 +1,8 @@
 Postgresql
 =========
 
-This playbook is created to install an Postgres database on an Redhat 9 Based machine,
-You can also create users and databases
+This role installs and configures a PostgreSQL database on Rocky Linux 9/10 or
+Ubuntu 24.04/26.04. You can also create users and databases.
 
 Requirements
 ------------
@@ -15,8 +15,8 @@ Role Variables
 A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
 
 - postgresql_version: "17"
-- postgresql_hba: "/var/lib/pgsql/17/data/pg_hba.conf"
-- postgresql_conf: "/var/lib/pgsql/17/data/postgresql.conf"
+- postgresql_hba: computed from postgresql_conf_dir, e.g. "/var/lib/pgsql/17/data/pg_hba.conf" (RedHat) or "/etc/postgresql/17/main/pg_hba.conf" (Debian)
+- postgresql_conf: computed from postgresql_conf_dir, same pattern as postgresql_hba
 - postgresql_port: "5432"
 - postgresql_sslmode: "Disable"
 - postgresql_root_password: "dbrootpass"
@@ -43,9 +43,6 @@ Including an example of how to use your role (for instance, with variables passe
         postgresql_database_name: "awx"
         postgresql_root_password: password
         postgres_host: "10.0.0.x"
-        postgresql_hba: "/var/lib/pgsql/{{ postgresql_version }}/data/pg_hba.conf"
-        postgresql_conf: "/var/lib/pgsql/{{ postgresql_version }}/data/postgresql.conf"
-
         postgresql_allow_subnet: "0.0.0.0/0"
         
 
@@ -61,6 +58,26 @@ Including an example of how to use your role (for instance, with variables passe
           - createusr
           - hardening
 ```
+
+Testing
+-------
+
+This role has a Molecule scenario that runs the role in VirtualBox VMs (via
+Vagrant) on Rocky Linux 9, Rocky Linux 10, Ubuntu 24.04 and Ubuntu 26.04,
+closely mirroring real servers:
+
+```shell
+pip install molecule "molecule-plugins[vagrant]" python-vagrant
+ansible-galaxy collection install -r requirements.yml
+
+# Works around molecule-plugins not registering its custom vagrant module
+# with newer molecule releases.
+export ANSIBLE_LIBRARY="$(python3 -c 'import molecule_plugins, os; print(os.path.join(os.path.dirname(molecule_plugins.__file__), "vagrant", "modules"))')"
+
+molecule test
+```
+
+Requires Vagrant and VirtualBox installed locally.
 
 License
 -------

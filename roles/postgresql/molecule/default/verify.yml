@@ -1,0 +1,10 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Check that PostgreSQL is listening on 5432
+      ansible.builtin.wait_for:
+        port: 5432
+        host: 127.0.0.1
+        timeout: 10

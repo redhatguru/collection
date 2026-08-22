@@ -1,7 +1,8 @@
 k3s
 =========
 
-Role to install k3s on an single node
+Role to install k3s on a single node. Supports Rocky Linux 9/10 and
+Ubuntu 24.04/26.04.
 
 # Requirements
 ------------
@@ -41,6 +42,26 @@ Example playbook:
       when: "'awx-prod' in group_names"
 
 ```
+
+# Testing
+------------
+
+This role has a Molecule scenario that runs the role in VirtualBox VMs (via
+Vagrant) on Rocky Linux 9, Rocky Linux 10, Ubuntu 24.04 and Ubuntu 26.04,
+closely mirroring real servers:
+
+```shell
+pip install molecule "molecule-plugins[vagrant]" python-vagrant
+ansible-galaxy collection install -r requirements.yml
+
+# Works around molecule-plugins not registering its custom vagrant module
+# with newer molecule releases.
+export ANSIBLE_LIBRARY="$(python3 -c 'import molecule_plugins, os; print(os.path.join(os.path.dirname(molecule_plugins.__file__), "vagrant", "modules"))')"
+
+molecule test
+```
+
+Requires Vagrant and VirtualBox installed locally.
 
 License
 -------

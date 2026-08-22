@@ -1,0 +1,13 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    postgresql_user: molecule_user
+    postgresql_user_password: molecule_pass
+    postgresql_database_name: molecule_db
+    postgresql_root_password: molecule_root_pass
+  tasks:
+    - name: Include postgresql role
+      ansible.builtin.include_role:
+        name: postgresql

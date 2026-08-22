@@ -1,0 +1,13 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Check that the k3s service is active
+      ansible.builtin.assert:
+        that:
+          - "'k3s.service' in ansible_facts.services"
+          - "ansible_facts.services['k3s.service'].state == 'running'"

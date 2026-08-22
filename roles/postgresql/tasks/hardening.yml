@@ -5,6 +5,7 @@
     dest: "{{ postgresql_hba }}"
     line: 'host    all          all            {{ postgresql_allow_subnet }}  md5'
     state: present
+  notify: Restart postgresql
 
 - name: Set listen_adressess
   ansible.builtin.lineinfile:
@@ -13,6 +14,7 @@
     line: "listen_addresses = '*'"
     state: present
     backup: true
+  notify: Restart postgresql
 
 - name: Set password for postgres database user
   become: true
@@ -20,9 +22,3 @@
   community.general.postgresql_user:
     name: postgres
     password: "{{ postgresql_root_password }}"
-
-- name: Restart postgresql
-  ansible.builtin.systemd:
-    name: postgresql-{{ postgresql_version }}
-    state: restarted
-    enabled: true

@@ -18,8 +18,9 @@
     name: firewalld
     state: stopped
     enabled: false
+  when: ansible_facts['os_family'] == 'RedHat'
 
-- name: Add Kubernetes repo
+- name: Add Kubernetes yum repo
   ansible.builtin.copy:
     dest: /etc/yum.repos.d/kubernetes.repo
     mode: '0644'
@@ -32,11 +33,48 @@
       gpgkey=https://pkgs.k8s.io/core:/stable:/{{ k3s_kubernetes_version }}/rpm/repodata/repomd.xml.key
       exclude=kubelet kubeadm cri-tools kubernetes-cni
   become: true
+  when: ansible_facts['os_family'] == 'RedHat'
 
-- name: Install kubectl
+- name: Install kubectl (RedHat)
   ansible.builtin.dnf:
     name: kubectl
     state: present
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Add Kubernetes apt signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/{{ k3s_kubernetes_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: '0644'
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Add Kubernetes apt repo
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc]
+      https://pkgs.k8s.io/core:/stable:/{{ k3s_kubernetes_version }}/deb/ /
+    filename: kubernetes
+    state: present
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Install kubectl (Debian)
+  ansible.builtin.apt:
+    name: kubectl
+    state: present
+    update_cache: true
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
 
 - name: Create ~/.kube directory
   ansible.builtin.file:
