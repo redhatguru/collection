@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT-0
+---
 ### REQUIRED
 # The namespace of the collection. This can be a company/brand/organization or product namespace under which all
 # content lives. May only contain alphanumeric lowercase characters and underscores. Namespaces cannot start with
@@ -41,7 +42,10 @@ tags: [tools]
 # collection label 'namespace.name'. The value is a version range
 # L(specifiers,https://python-semanticversion.readthedocs.io/en/latest/#requirement-specification). Multiple version
 # range specifiers can be set and are separated by ','
-dependencies: {}
+dependencies:
+  community.general: ">=8.0.0"
+  community.postgresql: ">=3.0.0"
+  ansible.posix: ">=1.5.0"
 
 # The URL of the originating SCM repository
 repository: https://github.com/redhatguru/collection

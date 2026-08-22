@@ -1,0 +1,21 @@
+---
+- name: Install Postgress
+  ansible.builtin.import_tasks:
+    file: install-pg.yml
+  tags: install
+
+- name: Create Postgress Database
+  ansible.builtin.import_tasks:
+    file: createdb-pg.yml
+  tags: createdb
+
+- name: Create Postgres Users
+  ansible.builtin.import_tasks:
+    file: createusr-pg.yml
+  tags: createusr
+
+- name: Harden Postgres
+  ansible.builtin.import_tasks:
+    file: hardening.yml
+  tags: hardening
+...

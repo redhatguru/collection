@@ -1,0 +1,10 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    patching_reboot: true
+  tasks:
+    - name: Include patching role
+      ansible.builtin.include_role:
+        name: patching

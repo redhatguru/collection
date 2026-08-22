@@ -1,0 +1,4 @@
+---
+# defaults file for patching
+patching_reboot: false
+patching_reboot_timeout: 600

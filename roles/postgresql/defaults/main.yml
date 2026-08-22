@@ -1,0 +1,16 @@
+---
+# defaults file for postgres
+postgresql_version: "17"
+postgresql_conf_dir: >-
+  {{ '/var/lib/pgsql/' + postgresql_version + '/data'
+     if ansible_facts['os_family'] == 'RedHat'
+     else '/etc/postgresql/' + postgresql_version + '/main' }}
+postgresql_hba: "{{ postgresql_conf_dir }}/pg_hba.conf"
+postgresql_conf: "{{ postgresql_conf_dir }}/postgresql.conf"
+postgresql_port: "5432"
+postgresql_sslmode: "Disable"
+postgresql_root_password: "dbrootpass"
+postgresql_user: "dbuser"
+postgresql_user_password: "dbuser"
+postgresql_database_name: "awx"
+postgresql_allow_subnet: "0.0.0.0/0"
