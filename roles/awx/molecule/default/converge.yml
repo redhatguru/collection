@@ -1,0 +1,41 @@
+---
+- name: Detect the private network IP on every host
+  hosts: all
+  tasks:
+    - name: Detect the private network IP
+      ansible.builtin.set_fact:
+        awx_test_private_ip: >-
+          {{ ansible_facts['all_ipv4_addresses']
+             | select('match', '^10\.10\.14\.')
+             | first }}
+
+- name: Install PostgreSQL for AWX
+  hosts: postgresql
+  become: true
+  vars:
+    postgresql_database_name: awx
+    postgresql_user: dbuser
+    postgresql_user_password: dbuser
+    postgresql_allow_subnet: "10.10.14.0/24"
+  tasks:
+    - name: Include postgresql role
+      ansible.builtin.include_role:
+        name: postgresql
+
+- name: Install a single-node Kubernetes cluster
+  hosts: single
+  become: true
+  tasks:
+    - name: Include kubernetes role
+      ansible.builtin.include_role:
+        name: kubernetes
+
+- name: Deploy AWX
+  hosts: single
+  become: true
+  vars:
+    awx_postgres_host: "{{ hostvars[groups['postgresql'][0]]['awx_test_private_ip'] }}"
+  tasks:
+    - name: Include awx role
+      ansible.builtin.include_role:
+        name: awx

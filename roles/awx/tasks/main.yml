@@ -1,0 +1,25 @@
+---
+- name: Ensure required variables are set
+  ansible.builtin.assert:
+    that:
+      - awx_postgres_host | length > 0
+    fail_msg: >-
+      awx_postgres_host must be set to the PostgreSQL server AWX should use
+      (see the postgresql role).
+    quiet: true
+
+- name: Ensure the AWX namespace exists
+  ansible.builtin.include_tasks: namespace.yml
+  tags: namespace
+
+- name: Install the AWX Operator
+  ansible.builtin.include_tasks: operator.yml
+  tags: operator
+
+- name: Create AWX secrets
+  ansible.builtin.include_tasks: secrets.yml
+  tags: secrets
+
+- name: Deploy AWX
+  ansible.builtin.include_tasks: deploy.yml
+  tags: deploy

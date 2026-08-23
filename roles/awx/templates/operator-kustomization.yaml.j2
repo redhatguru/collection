@@ -1,0 +1,14 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - github.com/ansible/awx-operator/config/default?ref={{ awx_operator_version }}
+images:
+  - name: quay.io/ansible/awx-operator
+    newTag: "{{ awx_operator_version }}"
+{% if awx_operator_kube_rbac_proxy_image %}
+  - name: gcr.io/kubebuilder/kube-rbac-proxy
+    newName: {{ awx_operator_kube_rbac_proxy_image.split(':')[0] }}
+    newTag: "{{ awx_operator_kube_rbac_proxy_image.split(':')[1] }}"
+{% endif %}
+namespace: {{ awx_namespace }}

@@ -1,0 +1,15 @@
+---
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: {{ awx_name }}
+  namespace: {{ awx_namespace }}
+spec:
+  service_type: {{ awx_service_type }}
+{% if awx_service_type == 'NodePort' %}
+  nodeport_port: {{ awx_nodeport_port }}
+{% endif %}
+  admin_user: {{ awx_admin_user }}
+  admin_password_secret: {{ awx_name }}-admin-password
+  postgres_configuration_secret: {{ awx_name }}-postgres-configuration
+  replicas: {{ awx_replicas }}
