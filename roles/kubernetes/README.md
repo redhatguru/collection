@@ -1,0 +1,183 @@
+kubernetes
+=========
+
+Installs Kubernetes via `kubeadm` (containerd runtime, Calico CNI) on Rocky
+Linux 9/10 or Ubuntu 24.04/26.04, as either a single all-in-one node or a
+multi-node cluster, and installs the Kubernetes Dashboard and some cluster
+hardening on top.
+
+Which mode a host gets is driven entirely by the inventory groups it's a
+member of:
+- `single` — the host gets its own independent, all-in-one cluster
+  (control-plane taint removed so it can run workloads too).
+- `masters` — the first host in this group runs `kubeadm init` and becomes
+  the control-plane endpoint (its own address, unless
+  `kubernetes_control_plane_endpoint` is overridden); any further hosts in
+  the group join it as additional control-plane nodes.
+- `workers` — hosts in this group join the cluster formed by the `masters`
+  group as workers.
+
+A host that isn't in any of these three groups is left untouched by this
+role. `single` is independent of `masters`/`workers` — don't mix a host
+into both.
+
+Requirements
+------------
+
+- A Rocky Linux 9/10 or Ubuntu 24.04/26.04 host, reachable with
+  `become: true` and outbound internet access (container images, the
+  `pkgs.k8s.io` and `download.docker.com` package repos, the Calico and
+  Dashboard manifests are all fetched from the internet).
+- At least 2 CPUs and 2GB RAM per node (kubeadm's own minimum).
+- For a `masters`/`workers` cluster, all nodes need to be able to reach
+  each other, and the workers/additional masters need to be able to reach
+  the first master on port 6443.
+
+### Collections
+
+This role needs the following collections on the control node (already
+declared in the collection's own `requirements.yml`/`galaxy.yml`, and in
+this role's own `requirements.yml`):
+- `ansible.posix` (`sysctl`)
+- `community.general` (`modprobe`)
+
+Install them with:
+```shell
+ansible-galaxy collection install -r requirements.yml
+```
+
+Role Variables
+--------------
+
+- `kubernetes_version` (default `"1.30"`) — Kubernetes minor version; selects
+  the `pkgs.k8s.io` package repository kubelet/kubeadm/kubectl are installed
+  from.
+- `kubernetes_node_ip` (default: the address of the node's default route) —
+  address this node advertises itself on, and the one other nodes join it
+  through. The default is correct for a normal single-NIC server; override
+  it per-host on multi-NIC hosts where the default route isn't the
+  interface other cluster nodes should reach this one on.
+- `kubernetes_pod_network_cidr` (default `"192.168.0.0/16"`) — pod network
+  CIDR passed to kubeadm and to the Calico manifest.
+- `kubernetes_calico_version` (default `"3.28.0"`) — Calico release to
+  install as the CNI.
+- `kubernetes_control_plane_endpoint` — host/IP the control plane is
+  reachable on. Defaults to the first `masters` host's address, so a
+  cluster works without a separate load balancer in front of it; only
+  relevant to the `masters`/`workers` mode.
+- `kubernetes_hold_packages` (default `true`) — pin kubelet/kubeadm/kubectl
+  (`dnf versionlock` / `apt-mark hold`) so a generic OS package update
+  can't bump them out from under the cluster.
+- `kubernetes_worker_join_command` / `kubernetes_control_plane_join_command`
+  — computed by the role on the first master/single node; do not set these
+  yourself.
+- `kubernetes_dashboard_enabled` (default `true`) — install the Kubernetes
+  Dashboard.
+- `kubernetes_dashboard_version` (default `"2.7.0"`) — Dashboard release to install.
+- `kubernetes_dashboard_admin_user` (default `true`) — the dashboard's
+  service account is bound to `cluster-admin`. Set to `false` to bind it to
+  the built-in read-only `view` ClusterRole instead.
+- `kubernetes_hardening_enabled` (default `true`) — master switch for all
+  hardening below.
+- `kubernetes_harden_kubelet` (default `true`) — disables kubelet anonymous
+  authentication and the kubelet read-only port. Baked into the cluster at
+  `kubeadm init` time (via a `KubeletConfiguration`), so it applies to
+  every node that joins, not just the one that ran `init`. Deliberately
+  does *not* set `protectKernelDefaults: true` — it makes kubelet refuse to
+  start unless the host's kernel sysctls exactly match Kubernetes'
+  hardcoded expectations, which varies enough across base images to be
+  unreliable as a default.
+- `kubernetes_harden_network_policy` (default `true`) — applies a
+  default-deny-all `NetworkPolicy` in the `default` namespace.
+
+Not covered by `kubernetes_harden_*` yet: API server flags (audit logging,
+anonymous auth) aren't hardened, since that means hand-editing kubeadm's
+static pod manifest, which is too fragile to do reliably across kubeadm
+versions. Something to revisit if this role grows a dedicated variant per
+supported kubeadm version.
+
+Example Playbook
+----------------
+
+Single all-in-one node:
+```yaml
+---
+- name: Install a single-node Kubernetes cluster
+  hosts: single
+  become: true
+
+  tasks:
+    - name: Kubernetes
+      ansible.builtin.include_role:
+        name: kubernetes
+```
+
+Multi-node cluster, using inventory groups `masters` and `workers`:
+```yaml
+---
+- name: Install a Kubernetes cluster
+  hosts: masters:workers
+  become: true
+  vars:
+    kubernetes_dashboard_admin_user: false
+    kubernetes_harden_network_policy: true
+
+  tasks:
+    - name: Kubernetes
+      ansible.builtin.include_role:
+        name: kubernetes
+```
+
+with an inventory like:
+```ini
+[masters]
+k8s-master-1
+k8s-master-2
+
+[workers]
+k8s-worker-1
+k8s-worker-2
+k8s-worker-3
+```
+
+Testing
+-------
+
+This role has three Molecule scenarios:
+- `default` — installs a `single` all-in-one cluster on Rocky Linux 9,
+  Rocky Linux 10, Ubuntu 24.04 and Ubuntu 26.04 (one independent cluster
+  per VM).
+- `cluster-ubuntu` — a `masters`/`workers` cluster (2 masters, 3 workers)
+  on Ubuntu 24.04.
+- `cluster-rockylinux` — the same 2 masters/3 workers topology, on Rocky
+  Linux 10.
+
+All of them run in VirtualBox VMs via Vagrant, closely mirroring real
+servers:
+
+```shell
+pip install molecule "molecule-plugins[vagrant]" python-vagrant
+ansible-galaxy collection install -r requirements.yml
+
+# Works around molecule-plugins not registering its custom vagrant module
+# with newer molecule releases.
+export ANSIBLE_LIBRARY="$(python3 -c 'import molecule_plugins, os; print(os.path.join(os.path.dirname(molecule_plugins.__file__), "vagrant", "modules"))')"
+
+molecule test                          # default scenario
+molecule test -s cluster-ubuntu
+molecule test -s cluster-rockylinux
+```
+
+Requires Vagrant and VirtualBox installed locally. The cluster scenarios
+bring up 5 VMs each, so expect them to take considerably longer than the
+`default` scenario.
+
+License
+-------
+
+license (BSD, MIT)
+
+Author Information
+------------------
+
+for questions, Contact guido-_@live.nl

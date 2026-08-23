@@ -1,0 +1,10 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: kubernetes
+  author: Guido Martens
+  description: Install and harden Kubernetes (single node or a masters/workers cluster) via kubeadm
+  license: "license (BSD, MIT)"
+  min_ansible_version: "2.15"
+  galaxy_tags: []

@@ -1,0 +1,77 @@
+---
+- name: Initialize the first control-plane node
+  when: inventory_hostname == groups['masters'][0]
+  block:
+    - name: Set control-plane mode facts (first master)
+      ansible.builtin.set_fact:
+        kubernetes_use_ha_endpoint: true
+
+    - name: Bootstrap the control plane
+      ansible.builtin.include_tasks: init-control-plane.yml
+
+- name: Join additional control-plane nodes
+  when: inventory_hostname != groups['masters'][0]
+  block:
+    - name: Wait for the primary control-plane endpoint to be reachable
+      ansible.builtin.wait_for:
+        host: "{{ kubernetes_control_plane_endpoint }}"
+        port: 6443
+        timeout: 180
+
+    - name: Join this node to the control plane
+      when: hostvars[groups['masters'][0]]['kubernetes_control_plane_join_command'] | length > 0
+      block:
+        - name: Attempt to join this node to the control plane
+          ansible.builtin.command: >-
+            {{ hostvars[groups['masters'][0]]['kubernetes_control_plane_join_command'] }}
+            --apiserver-advertise-address={{ kubernetes_node_ip }}
+          become: true
+          args:
+            creates: /etc/kubernetes/kubelet.conf
+      rescue:
+        # kubeadm's own retry budget for promoting the new etcd learner member
+        # to a full voting member can be too short if etcd replication is
+        # slow (e.g. under disk/network contention). "kubeadm reset" cleans up
+        # local state so the join can be safely retried once; the API server
+        # can still be left with a stale Node object from the failed attempt
+        # (kubelet can register before the later etcd step fails), so that's
+        # removed too, delegated to the first master since this node's own
+        # kubeconfig no longer exists after the reset.
+        - name: Clean up the failed join attempt
+          ansible.builtin.command: kubeadm reset -f
+          become: true
+          changed_when: true
+
+        - name: Remove any stale Node object left behind by the failed attempt
+          ansible.builtin.command: "kubectl delete node {{ inventory_hostname }} --ignore-not-found"
+          delegate_to: "{{ groups['masters'][0] }}"
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          become: true
+          changed_when: true
+
+        - name: Give etcd time to finish replicating before retrying
+          ansible.builtin.pause:
+            seconds: 60
+
+        - name: Retry joining this node to the control plane
+          ansible.builtin.command: >-
+            {{ hostvars[groups['masters'][0]]['kubernetes_control_plane_join_command'] }}
+            --apiserver-advertise-address={{ kubernetes_node_ip }}
+          become: true
+          changed_when: true
+
+    - name: Create kube directory for the connecting user
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: "0700"
+
+    - name: Copy admin kubeconfig for the connecting user
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ ansible_env.HOME }}/.kube/config"
+        remote_src: true
+        owner: "{{ ansible_env.USER }}"
+        mode: "0600"
+      become: true

@@ -1,0 +1,15 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  tasks:
+    - name: Detect the private network IP
+      ansible.builtin.set_fact:
+        kubernetes_node_ip: >-
+          {{ ansible_facts['all_ipv4_addresses']
+             | select('match', '^10\.10\.11\.')
+             | first }}
+
+    - name: Include kubernetes role
+      ansible.builtin.include_role:
+        name: kubernetes

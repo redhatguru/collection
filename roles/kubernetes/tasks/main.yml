@@ -1,0 +1,40 @@
+---
+- name: Prepare host for Kubernetes
+  ansible.builtin.include_tasks: prerequisites.yml
+  tags: prerequisites
+
+- name: Install container runtime and Kubernetes packages
+  ansible.builtin.include_tasks: "install-{{ ansible_facts['os_family'] }}.yml"
+  tags: install
+
+- name: Bootstrap single-node cluster
+  ansible.builtin.include_tasks: single.yml
+  tags: cluster
+  when: inventory_hostname in (groups['single'] | default([]))
+
+- name: Bootstrap masters/workers cluster (masters)
+  ansible.builtin.include_tasks: masters.yml
+  tags: cluster
+  when: inventory_hostname in (groups['masters'] | default([]))
+
+- name: Bootstrap masters/workers cluster (workers)
+  ansible.builtin.include_tasks: workers.yml
+  tags: cluster
+  when: inventory_hostname in (groups['workers'] | default([]))
+
+- name: Install Kubernetes Dashboard
+  ansible.builtin.include_tasks: dashboard.yml
+  tags: dashboard
+  when:
+    - kubernetes_dashboard_enabled | bool
+    - (inventory_hostname in (groups['single'] | default([]))) or
+      (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
+
+- name: Apply cluster hardening
+  ansible.builtin.include_tasks: hardening.yml
+  tags: hardening
+  when:
+    - kubernetes_hardening_enabled | bool
+    - (inventory_hostname in (groups['single'] | default([]))) or
+      (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
+...

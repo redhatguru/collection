@@ -1,0 +1,36 @@
+---
+- name: Install the Kubernetes Dashboard
+  ansible.builtin.command: >-
+    kubectl apply -f
+    https://raw.githubusercontent.com/kubernetes/dashboard/v{{ kubernetes_dashboard_version }}/aio/deploy/recommended.yaml
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_dashboard_apply
+  retries: 10
+  delay: 10
+  until: kubernetes_dashboard_apply.rc == 0
+
+- name: Template the dashboard service account and RBAC binding
+  ansible.builtin.template:
+    src: dashboard-rbac.yaml.j2
+    dest: /etc/kubernetes/dashboard-rbac.yaml
+    mode: "0600"
+  become: true
+
+- name: Apply the dashboard service account and RBAC binding
+  ansible.builtin.command: kubectl apply -f /etc/kubernetes/dashboard-rbac.yaml
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for the dashboard deployment to become available
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Available deployment/kubernetes-dashboard
+    -n kubernetes-dashboard --timeout=480s
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false

@@ -1,0 +1,67 @@
+---
+- name: Make sure Firewalld is disabled
+  ansible.builtin.systemd:
+    name: firewalld
+    state: stopped
+    enabled: false
+  become: true
+
+- name: Add Docker CE repo (for containerd.io)
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/rhel/docker-ce.repo
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: "0644"
+  become: true
+
+- name: Install containerd
+  ansible.builtin.dnf:
+    name: containerd.io
+    state: present
+  become: true
+
+- name: Include containerd configuration
+  ansible.builtin.include_tasks: containerd.yml
+
+- name: Add Kubernetes yum repo
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/kubernetes.repo
+    mode: "0644"
+    content: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/rpm/
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/rpm/repodata/repomd.xml.key
+      exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+  become: true
+
+- name: Install kubelet, kubeadm and kubectl
+  ansible.builtin.dnf:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    disable_excludes: kubernetes
+  become: true
+
+- name: Install dnf versionlock plugin
+  ansible.builtin.dnf:
+    name: python3-dnf-plugin-versionlock
+    state: present
+  become: true
+  when: kubernetes_hold_packages | bool
+
+- name: Pin kubelet, kubeadm and kubectl versions
+  ansible.builtin.command: dnf versionlock add kubelet kubeadm kubectl
+  become: true
+  register: kubernetes_versionlock_result
+  changed_when: "'Adding versionlock' in kubernetes_versionlock_result.stdout"
+  when: kubernetes_hold_packages | bool
+
+- name: Ensure kubelet is enabled
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+  become: true

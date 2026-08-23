@@ -1,0 +1,40 @@
+---
+- name: Verify
+  hosts: masters[0]
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Get node status
+      ansible.builtin.command: kubectl get nodes --no-headers
+      register: kubernetes_verify_nodes
+      changed_when: false
+      retries: 12
+      delay: 10
+      until: >-
+        kubernetes_verify_nodes.stdout_lines | length == 5
+        and kubernetes_verify_nodes.stdout_lines | select('search', ' Ready') | list | length == 5
+
+    - name: Assert all 5 nodes are present and Ready
+      ansible.builtin.assert:
+        that:
+          - kubernetes_verify_nodes.stdout_lines | length == 5
+          - kubernetes_verify_nodes.stdout_lines | select('search', ' Ready') | list | length == 5
+
+    - name: Check dashboard deployment is available
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - deployment
+          - kubernetes-dashboard
+          - -n
+          - kubernetes-dashboard
+          - -o
+          - jsonpath={.status.conditions[?(@.type=="Available")].status}
+      register: kubernetes_verify_dashboard
+      changed_when: false
+
+    - name: Assert dashboard is available
+      ansible.builtin.assert:
+        that: kubernetes_verify_dashboard.stdout == "True"
