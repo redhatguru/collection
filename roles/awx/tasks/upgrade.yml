@@ -1,0 +1,32 @@
+---
+# The AWX Operator model is declarative, so "upgrading" is mostly just
+# re-applying the (now-changed) operator kustomize manifests and AWX
+# custom resource — unlike a kubeadm cluster there's no separate
+# imperative "upgrade" command to run. This task exists to make that
+# explicit, opt-in (tag "upgrade", never runs in a normal play), and to
+# confirm the resulting rollout actually completed rather than just
+# firing the apply and walking away.
+
+- name: Re-apply the AWX Operator (picks up awx_operator_version changes)
+  ansible.builtin.include_tasks: operator.yml
+
+- name: Re-apply the AWX instance manifest (picks up awx_image_version changes)
+  ansible.builtin.include_tasks: deploy.yml
+
+- name: Wait for the AWX web rollout to finish
+  ansible.builtin.command: >-
+    kubectl rollout status deployment/{{ awx_name }}-web
+    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: false
+
+- name: Wait for the AWX task rollout to finish
+  ansible.builtin.command: >-
+    kubectl rollout status deployment/{{ awx_name }}-task
+    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: false

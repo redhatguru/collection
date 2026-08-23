@@ -55,6 +55,10 @@ Role Variables
 - `awx_admin_password` (default `"ChangeMe123!"`) — password for
   `awx_admin_user`. Change this.
 - `awx_replicas` (default `1`) — number of AWX replicas.
+- `awx_image_version` (default `""`) — pins the AWX application image tag
+  independently of `awx_operator_version`. Empty means "use whatever
+  version the installed operator bundles by default". Only used by the
+  `upgrade` tag; see "Upgrading AWX" below.
 - `awx_postgres_host` (no default, must be set) — address of the external
   PostgreSQL server (e.g. the host running the `postgresql` role).
 - `awx_postgres_port` (default `5432`)
@@ -106,6 +110,43 @@ Example Playbook
     - name: AWX
       ansible.builtin.include_role:
         name: awx
+```
+
+Upgrading AWX
+-------------
+
+Because the AWX Operator model is declarative, an upgrade is mostly just
+re-applying the operator's kustomize manifests and the `AWX` custom
+resource with new version variables — there's no separate imperative
+"upgrade" command to run, unlike the `kubernetes` role's kubeadm-based
+upgrade. This role still makes it explicit and opt-in: the upgrade tasks
+are tagged `[upgrade, never]`, so they never run as part of a normal play,
+only when requested with `--tags upgrade`. They re-apply the operator and
+the AWX instance, then wait for `kubectl rollout status` on both the
+`<name>-web` and `<name>-task` deployments to confirm the rollout actually
+completed.
+
+Two independent things can be upgraded:
+- **The AWX Operator** (and whatever AWX version it bundles by default) —
+  bump `awx_operator_version`.
+- **AWX itself**, independently of the operator — set `awx_image_version`
+  to pin a specific AWX image tag.
+
+```yaml
+---
+- name: Upgrade AWX
+  hosts: k8s_server
+  become: true
+  vars:
+    awx_postgres_host: "{{ hostvars['postgres_server']['ansible_default_ipv4']['address'] }}"
+    awx_operator_version: "2.19.1"
+    awx_image_version: "24.6.1"
+
+  tasks:
+    - name: AWX
+      ansible.builtin.include_role:
+        name: awx
+      tags: upgrade
 ```
 
 Testing

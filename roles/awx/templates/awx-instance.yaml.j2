@@ -13,3 +13,6 @@ spec:
   admin_password_secret: {{ awx_name }}-admin-password
   postgres_configuration_secret: {{ awx_name }}-postgres-configuration
   replicas: {{ awx_replicas }}
+{% if awx_image_version %}
+  image_version: "{{ awx_image_version }}"
+{% endif %}

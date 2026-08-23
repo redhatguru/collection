@@ -33,6 +33,13 @@ awx_admin_password: "ChangeMe123!"
 # Number of AWX replicas.
 awx_replicas: 1
 
+# Pin the AWX application image tag independently of awx_operator_version.
+# Empty (the default) means "use whatever version the installed operator
+# bundles by default". Set this to upgrade (or pin) AWX itself without
+# necessarily upgrading the operator. See the "Upgrading AWX" section in
+# the README.
+awx_image_version: ""
+
 # External PostgreSQL database AWX connects to. Defaults match the
 # postgresql role's own defaults (postgresql_database_name: "awx",
 # postgresql_user: "dbuser") so the two roles work together out of the
