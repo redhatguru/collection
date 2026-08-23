@@ -1,0 +1,45 @@
+---
+# Example playbook for the kubernetes role. Which mode a host gets (single
+# all-in-one node, or a masters/workers cluster) is driven entirely by
+# which of these inventory groups it's a member of — this one playbook
+# covers both, since a host that isn't in any of the three groups is left
+# untouched by the role.
+#
+# Single node:
+#   [single]
+#   k8s-single-01
+#
+# Or a multi-node cluster instead (don't mix a host into both single and
+# masters/workers):
+#   [masters]
+#   k8s-master-01
+#   k8s-master-02
+#
+#   [workers]
+#   k8s-worker-01
+#   k8s-worker-02
+#   k8s-worker-03
+- name: Install Kubernetes
+  hosts: single:masters:workers
+  become: true
+  vars:
+    # Kubernetes minor version; selects the pkgs.k8s.io package repository
+    # kubelet/kubeadm/kubectl are installed from.
+    kubernetes_version: "1.30"
+    # Pod network CIDR passed to kubeadm and to the Calico manifest.
+    kubernetes_pod_network_cidr: "192.168.0.0/16"
+    # Install the Kubernetes Dashboard, with its service account bound to
+    # cluster-admin (set to false to bind it to the read-only "view" role
+    # instead).
+    kubernetes_dashboard_enabled: true
+    kubernetes_dashboard_admin_user: true
+    # Cluster hardening: disable kubelet anonymous auth/read-only port at
+    # kubeadm init/join time, and apply a default-deny NetworkPolicy.
+    kubernetes_hardening_enabled: true
+    kubernetes_harden_kubelet: true
+    kubernetes_harden_network_policy: true
+
+  tasks:
+    - name: Kubernetes
+      ansible.builtin.include_role:
+        name: redhatguru.general.kubernetes

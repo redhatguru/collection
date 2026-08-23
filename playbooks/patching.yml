@@ -1,0 +1,20 @@
+---
+# Example playbook for the patching role. Applies to every managed host by
+# design (it's an OS-update role), not a dedicated inventory group.
+- name: Patch servers
+  hosts: all
+  become: true
+  vars:
+    # Allow the role to reboot a host, but only when a reboot is actually
+    # required (checked via needs-restarting -r on RHEL family hosts, and
+    # /var/run/reboot-required on Debian family hosts). With false
+    # (the role's default), packages are updated but hosts are never
+    # rebooted, even if one is required.
+    patching_reboot: true
+    # Seconds to wait for a host to come back up after a reboot.
+    patching_reboot_timeout: 600
+
+  tasks:
+    - name: Patching
+      ansible.builtin.include_role:
+        name: redhatguru.general.patching
