@@ -1,0 +1,62 @@
+---
+- name: Determine whether this is the primary control-plane node
+  ansible.builtin.set_fact:
+    kubernetes_upgrade_is_primary: >-
+      {{ (inventory_hostname in (groups['single'] | default([])))
+         or (inventory_hostname == (groups['masters'] | default([]) | first | default(''))) }}
+
+- name: Determine which host to run kubectl drain/uncordon against
+  ansible.builtin.set_fact:
+    kubernetes_upgrade_kubectl_host: >-
+      {{ inventory_hostname
+         if inventory_hostname in ((groups['single'] | default([])) + (groups['masters'] | default([])))
+         else (groups['masters'] | default([inventory_hostname]) | first) }}
+
+- name: Cordon and drain this node
+  ansible.builtin.command: >-
+    kubectl drain {{ inventory_hostname }}
+    --ignore-daemonsets --delete-emptydir-data --force --timeout=300s
+  delegate_to: "{{ kubernetes_upgrade_kubectl_host }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: true
+
+- name: Update the Kubernetes repo and upgrade kubeadm
+  ansible.builtin.include_tasks: "upgrade-{{ ansible_facts['os_family'] }}.yml"
+
+- name: Detect the newly installed kubeadm version
+  ansible.builtin.command: kubeadm version -o short
+  become: true
+  changed_when: false
+  register: kubernetes_upgrade_kubeadm_version
+
+- name: Apply the upgrade on the primary control-plane node
+  ansible.builtin.command: "kubeadm upgrade apply {{ kubernetes_upgrade_kubeadm_version.stdout }} -y"
+  become: true
+  when: kubernetes_upgrade_is_primary
+  changed_when: true
+
+- name: Fetch the upgrade on this node
+  ansible.builtin.command: kubeadm upgrade node
+  become: true
+  when: not kubernetes_upgrade_is_primary
+  changed_when: true
+
+- name: Upgrade kubelet and kubectl
+  ansible.builtin.include_tasks: "upgrade-packages-{{ ansible_facts['os_family'] }}.yml"
+
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    daemon_reload: true
+    state: restarted
+  become: true
+
+- name: Uncordon this node
+  ansible.builtin.command: "kubectl uncordon {{ inventory_hostname }}"
+  delegate_to: "{{ kubernetes_upgrade_kubectl_host }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: true

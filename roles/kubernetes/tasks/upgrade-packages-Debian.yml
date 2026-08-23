@@ -1,0 +1,28 @@
+---
+- name: Remove the hold on kubelet and kubectl
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: install
+  become: true
+  loop:
+    - kubelet
+    - kubectl
+  when: kubernetes_hold_packages | bool
+
+- name: Upgrade kubelet and kubectl
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubectl
+    state: latest # noqa package-latest
+  become: true
+
+- name: Re-add the hold on kubelet and kubectl
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  become: true
+  loop:
+    - kubelet
+    - kubectl
+  when: kubernetes_hold_packages | bool

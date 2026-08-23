@@ -89,6 +89,9 @@ Role Variables
   unreliable as a default.
 - `kubernetes_harden_network_policy` (default `true`) — applies a
   default-deny-all `NetworkPolicy` in the `default` namespace.
+- `kubernetes_upgrade_version` (default: `kubernetes_version`) — target
+  minor version for a rolling upgrade. Only used by the `upgrade` tag; see
+  "Rolling Upgrade" below.
 
 Not covered by `kubernetes_harden_*` yet: API server flags (audit logging,
 anonymous auth) aren't hardened, since that means hand-editing kubeadm's
@@ -139,6 +142,48 @@ k8s-worker-1
 k8s-worker-2
 k8s-worker-3
 ```
+
+Rolling Upgrade
+----------------
+
+Upgrading kubelet/kubeadm/kubectl to a new minor version is opt-in only —
+the upgrade tasks are tagged `[upgrade, never]`, so they never run as part
+of a normal play, only when explicitly requested with `--tags upgrade`.
+For a single host this cordons and drains the node, upgrades the
+`pkgs.k8s.io` repo and packages to `kubernetes_upgrade_version`, runs
+`kubeadm upgrade apply` (on the primary control-plane node/`single`) or
+`kubeadm upgrade node` (everywhere else), restarts kubelet, then
+uncordons the node.
+
+To upgrade a whole cluster as a genuine *rolling* upgrade — one node at a
+time, keeping the cluster available throughout — add `serial: 1` to the
+play, and make sure the primary master (`groups['masters'][0]`) is
+upgraded first, since `kubeadm upgrade apply` has to run there before any
+other node can `kubeadm upgrade node`:
+
+```yaml
+---
+- name: Rolling-upgrade the Kubernetes cluster
+  hosts: masters:workers
+  become: true
+  serial: 1
+  vars:
+    kubernetes_upgrade_version: "1.31"
+
+  tasks:
+    - name: Kubernetes
+      ansible.builtin.include_role:
+        name: kubernetes
+      tags: upgrade
+```
+
+`ansible-playbook` preserves inventory order within `hosts: masters:workers`,
+so as long as the primary master is listed first under `[masters]` in your
+inventory, `serial: 1` upgrades it first, then the rest of `masters`, then
+`workers`, one at a time. After a successful upgrade, update your own
+`kubernetes_version` to match `kubernetes_upgrade_version` so future runs
+(without `--tags upgrade`) don't try to reconcile packages back to the old
+version.
 
 Testing
 -------

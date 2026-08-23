@@ -27,6 +27,11 @@ kubernetes_control_plane_endpoint: >-
 # Pin kubelet/kubeadm/kubectl so a generic OS package update can't bump them.
 kubernetes_hold_packages: true
 
+# Target minor version for a rolling upgrade (tag "upgrade", opt-in only —
+# see tasks/upgrade.yml). Defaults to kubernetes_version so an accidental
+# run without overriding it is a no-op rather than a downgrade attempt.
+kubernetes_upgrade_version: "{{ kubernetes_version }}"
+
 # Computed by the role on the first master/single node; do not set manually.
 kubernetes_worker_join_command: ""
 kubernetes_control_plane_join_command: ""

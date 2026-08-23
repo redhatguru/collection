@@ -37,4 +37,13 @@
     - kubernetes_hardening_enabled | bool
     - (inventory_hostname in (groups['single'] | default([]))) or
       (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
+
+# Opt-in only: never runs as part of a normal play, only when explicitly
+# requested with --tags upgrade. See tasks/upgrade.yml and the README for
+# how to run this as a true rolling upgrade (one node at a time).
+- name: Perform a rolling upgrade
+  ansible.builtin.include_tasks: upgrade.yml
+  tags: [upgrade, never]
+  when: inventory_hostname in ((groups['single'] | default([])) +
+    (groups['masters'] | default([])) + (groups['workers'] | default([])))
 ...
