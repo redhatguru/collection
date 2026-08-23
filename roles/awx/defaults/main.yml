@@ -1,0 +1,58 @@
+---
+# defaults file for awx
+
+# Kubernetes namespace the AWX Operator and the AWX instance are deployed
+# into. Both are deployed into the same namespace for simplicity.
+awx_namespace: "awx"
+
+# AWX Operator release to install (git ref / image tag), applied via its
+# published kustomize manifests.
+awx_operator_version: "2.19.1"
+
+# Workaround for a broken image reference in the awx-operator 2.19.1
+# manifests: they pin gcr.io/kubebuilder/kube-rbac-proxy:v0.15.0, which no
+# longer exists now that Google has deprecated old GCR image paths. This
+# redirects that image to its original upstream registry instead. Set to
+# "" to disable the override (e.g. once a newer awx-operator release fixes
+# this upstream).
+awx_operator_kube_rbac_proxy_image: "quay.io/brancz/kube-rbac-proxy:v0.15.0"
+
+# Name of the AWX custom resource. Also used as the prefix for the
+# resources the operator creates for it (Deployment, Service, ...).
+awx_name: "awx"
+
+# How the AWX web service is exposed. One of: ClusterIP, NodePort, LoadBalancer.
+awx_service_type: "NodePort"
+# Only used when awx_service_type is "NodePort".
+awx_nodeport_port: 30080
+
+# AWX admin (superuser) account, created on first boot.
+awx_admin_user: "admin"
+awx_admin_password: "ChangeMe123!"
+
+# Number of AWX replicas.
+awx_replicas: 1
+
+# Pin the AWX application image tag independently of awx_operator_version.
+# Empty (the default) means "use whatever version the installed operator
+# bundles by default". Set this to upgrade (or pin) AWX itself without
+# necessarily upgrading the operator. See the "Upgrading AWX" section in
+# the README.
+awx_image_version: ""
+
+# External PostgreSQL database AWX connects to. Defaults match the
+# postgresql role's own defaults (postgresql_database_name: "awx",
+# postgresql_user: "dbuser") so the two roles work together out of the
+# box; awx_postgres_host has no generic default and normally needs to be
+# set to the host running the postgresql role.
+awx_postgres_host: ""
+awx_postgres_port: 5432
+awx_postgres_database: "awx"
+awx_postgres_user: "dbuser"
+awx_postgres_password: "dbuser"
+awx_postgres_sslmode: "prefer"
+
+# How long to wait (seconds) for the operator and AWX itself to become
+# ready. AWX's images are large and the operator does several reconcile
+# passes, so this is generous by default.
+awx_wait_timeout: 900

@@ -1,0 +1,35 @@
+---
+- name: Ensure the AWX Operator kustomize directory exists
+  ansible.builtin.file:
+    path: /etc/kubernetes/awx-operator-kustomize
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Template the AWX Operator kustomization
+  ansible.builtin.template:
+    src: operator-kustomization.yaml.j2
+    dest: /etc/kubernetes/awx-operator-kustomize/kustomization.yaml
+    mode: "0644"
+  become: true
+
+- name: Install the AWX Operator
+  ansible.builtin.command: kubectl apply -k /etc/kubernetes/awx-operator-kustomize
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: false
+  register: awx_operator_apply
+  retries: 10
+  delay: 10
+  until: awx_operator_apply.rc == 0
+
+- name: Wait for the AWX Operator controller-manager to become available
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Available
+    deployment/awx-operator-controller-manager
+    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: false
