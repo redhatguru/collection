@@ -1,0 +1,21 @@
+---
+# Example playbook for the k3s role.
+#
+# Inventory:
+#   [k3s]
+#   k3s-server-01
+- name: Install K3s
+  hosts: k3s
+  become: true
+  vars:
+    # K3s release to install, passed as INSTALL_K3S_VERSION to the
+    # upstream install script.
+    k3s_version: "v1.28.6+k3s2"
+    # Kubernetes minor version used to select the pkgs.k8s.io repository
+    # kubectl is installed from.
+    k3s_kubernetes_version: "v1.30"
+
+  tasks:
+    - name: K3s
+      ansible.builtin.include_role:
+        name: redhatguru.general.k3s

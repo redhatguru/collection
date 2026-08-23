@@ -1,0 +1,30 @@
+---
+# Example playbook for the postgresql role.
+#
+# Inventory:
+#   [postgresql]
+#   postgres-server-01
+- name: Deploy PostgreSQL
+  hosts: postgresql
+  become: true
+  vars:
+    # PostgreSQL major version to install.
+    postgresql_version: "17"
+    # Application database user and database created for it.
+    postgresql_user: "awx"
+    postgresql_user_password: "ChangeMe123!"
+    postgresql_database_name: "awx"
+    # Password set for the postgres superuser during hardening.
+    postgresql_root_password: "ChangeMeToo123!"
+    # CIDR allowed to connect with md5 auth in pg_hba.conf.
+    postgresql_allow_subnet: "10.0.0.0/24"
+
+  tasks:
+    - name: PostgreSQL
+      ansible.builtin.include_role:
+        name: redhatguru.general.postgresql
+      tags:
+        - install
+        - createdb
+        - createusr
+        - hardening
