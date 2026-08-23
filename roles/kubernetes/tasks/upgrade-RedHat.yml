@@ -1,0 +1,36 @@
+---
+- name: Update the Kubernetes yum repo to the target version
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/kubernetes.repo
+    mode: "0644"
+    content: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_upgrade_version }}/rpm/
+      enabled=1
+      gpgcheck=1
+      gpgkey=https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_upgrade_version }}/rpm/repodata/repomd.xml.key
+      exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+  become: true
+
+- name: Remove the version lock on kubeadm
+  ansible.builtin.command: dnf versionlock delete kubeadm
+  become: true
+  register: kubernetes_upgrade_unlock_kubeadm
+  changed_when: "'Deleting versionlock' in kubernetes_upgrade_unlock_kubeadm.stdout"
+  failed_when: false
+  when: kubernetes_hold_packages | bool
+
+- name: Upgrade kubeadm
+  ansible.builtin.dnf:
+    name: kubeadm
+    state: latest # noqa package-latest
+    disable_excludes: kubernetes
+  become: true
+
+- name: Re-add the version lock on kubeadm
+  ansible.builtin.command: dnf versionlock add kubeadm
+  become: true
+  register: kubernetes_upgrade_lock_kubeadm
+  changed_when: "'Adding versionlock' in kubernetes_upgrade_lock_kubeadm.stdout"
+  when: kubernetes_hold_packages | bool

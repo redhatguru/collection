@@ -1,0 +1,23 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ kubernetes_node_ip }}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: {{ kubernetes_kubeadm_version.stdout }}
+{% if kubernetes_use_ha_endpoint %}
+controlPlaneEndpoint: "{{ kubernetes_control_plane_endpoint }}:6443"
+{% endif %}
+networking:
+  podSubnet: {{ kubernetes_pod_network_cidr }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+{% if kubernetes_hardening_enabled | bool and kubernetes_harden_kubelet | bool %}
+authentication:
+  anonymous:
+    enabled: false
+readOnlyPort: 0
+{% endif %}

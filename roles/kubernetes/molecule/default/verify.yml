@@ -1,0 +1,39 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Check node is Ready
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - nodes
+          - -o
+          - jsonpath={.items[0].status.conditions[?(@.type=="Ready")].status}
+      register: kubernetes_verify_node_ready
+      changed_when: false
+
+    - name: Assert node is Ready
+      ansible.builtin.assert:
+        that: kubernetes_verify_node_ready.stdout == "True"
+
+    - name: Check dashboard deployment is available
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - deployment
+          - kubernetes-dashboard
+          - -n
+          - kubernetes-dashboard
+          - -o
+          - jsonpath={.status.conditions[?(@.type=="Available")].status}
+      register: kubernetes_verify_dashboard
+      changed_when: false
+
+    - name: Assert dashboard is available
+      ansible.builtin.assert:
+        that: kubernetes_verify_dashboard.stdout == "True"

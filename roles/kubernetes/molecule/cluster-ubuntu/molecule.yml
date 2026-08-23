@@ -1,0 +1,88 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  parallel: false
+  provider:
+    name: virtualbox
+platforms:
+  - name: master1
+    box: bento/ubuntu-24.04
+    memory: 6144
+    cpus: 4
+    groups:
+      - masters
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.11.11
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: master2
+    box: bento/ubuntu-24.04
+    memory: 6144
+    cpus: 4
+    groups:
+      - masters
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.11.12
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: worker1
+    box: bento/ubuntu-24.04
+    memory: 2048
+    cpus: 2
+    groups:
+      - workers
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.11.13
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: worker2
+    box: bento/ubuntu-24.04
+    memory: 2048
+    cpus: 2
+    groups:
+      - workers
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.11.14
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: worker3
+    box: bento/ubuntu-24.04
+    memory: 2048
+    cpus: 2
+    groups:
+      - workers
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.11.15
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "../../.."
+  playbooks:
+    prepare: prepare.yml
+verifier:
+  name: ansible
+ansible:
+  cfg:
+    ssh_connection:
+      retries: 5
+    defaults:
+      timeout: 30

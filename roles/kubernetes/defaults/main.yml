@@ -1,0 +1,53 @@
+---
+# defaults file for kubernetes
+
+# Kubernetes minor version (used to select the pkgs.k8s.io package repo).
+kubernetes_version: "1.30"
+
+# Address this node advertises itself on and joins/is joined through.
+# Defaults to the address of its default route, which is correct for a
+# normal single-NIC server. Override this (e.g. per-host) on multi-NIC
+# hosts where the default route isn't the interface other nodes should
+# use to reach this one.
+kubernetes_node_ip: "{{ ansible_default_ipv4.address }}"
+
+# Pod network CIDR handed to kubeadm and to the Calico manifest.
+kubernetes_pod_network_cidr: "192.168.0.0/16"
+
+# Calico is the only CNI this role installs.
+kubernetes_calico_version: "3.28.0"
+
+# Endpoint (host/IP) the control plane is reachable on. Only relevant for
+# the "masters" group; defaults to the first master's address so a cluster
+# works out of the box without a separate load balancer in front of it.
+kubernetes_control_plane_endpoint: >-
+  {{ hostvars[groups['masters'][0]]['kubernetes_node_ip']
+     if (groups['masters'] | default([])) | length > 0 else '' }}
+
+# Pin kubelet/kubeadm/kubectl so a generic OS package update can't bump them.
+kubernetes_hold_packages: true
+
+# Target minor version for a rolling upgrade (tag "upgrade", opt-in only —
+# see tasks/upgrade.yml). Defaults to kubernetes_version so an accidental
+# run without overriding it is a no-op rather than a downgrade attempt.
+kubernetes_upgrade_version: "{{ kubernetes_version }}"
+
+# Computed by the role on the first master/single node; do not set manually.
+kubernetes_worker_join_command: ""
+kubernetes_control_plane_join_command: ""
+
+# Kubernetes Dashboard.
+kubernetes_dashboard_enabled: true
+kubernetes_dashboard_version: "2.7.0"
+# When true, the dashboard service account is bound to cluster-admin (handy
+# for a lab). When false, it's bound to the built-in read-only "view" role.
+kubernetes_dashboard_admin_user: true
+
+# Hardening. kubernetes_hardening_enabled is the master switch; the two
+# sub-toggles below only take effect while it's true.
+kubernetes_hardening_enabled: true
+# Disables kubelet anonymous auth and the kubelet read-only port.
+# Applied at kubeadm init/join time.
+kubernetes_harden_kubelet: true
+# Applies a default-deny NetworkPolicy in the default namespace.
+kubernetes_harden_network_policy: true

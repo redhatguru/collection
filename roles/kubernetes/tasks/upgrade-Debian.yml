@@ -1,0 +1,38 @@
+---
+- name: Update the Kubernetes apt signing key for the target version
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_upgrade_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: "0644"
+    force: true
+  become: true
+
+- name: Update the Kubernetes apt repository to the target version
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc]
+      https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_upgrade_version }}/deb/ /
+    filename: kubernetes
+    state: present
+  become: true
+
+- name: Remove the hold on kubeadm
+  ansible.builtin.dpkg_selections:
+    name: kubeadm
+    selection: install
+  become: true
+  when: kubernetes_hold_packages | bool
+
+- name: Upgrade kubeadm
+  ansible.builtin.apt:
+    name: kubeadm
+    state: latest # noqa package-latest
+    update_cache: true
+  become: true
+
+- name: Re-add the hold on kubeadm
+  ansible.builtin.dpkg_selections:
+    name: kubeadm
+    selection: hold
+  become: true
+  when: kubernetes_hold_packages | bool

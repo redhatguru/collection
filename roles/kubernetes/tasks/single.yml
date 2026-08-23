@@ -1,0 +1,7 @@
+---
+- name: Set control-plane mode facts (single node)
+  ansible.builtin.set_fact:
+    kubernetes_use_ha_endpoint: false
+
+- name: Bootstrap the control plane
+  ansible.builtin.include_tasks: init-control-plane.yml

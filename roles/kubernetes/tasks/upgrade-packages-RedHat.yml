@@ -1,0 +1,27 @@
+---
+- name: Remove the version lock on kubelet and kubectl
+  ansible.builtin.command: "dnf versionlock delete {{ item }}"
+  become: true
+  loop:
+    - kubelet
+    - kubectl
+  register: kubernetes_upgrade_unlock_result
+  changed_when: "'Deleting versionlock' in kubernetes_upgrade_unlock_result.stdout"
+  failed_when: false
+  when: kubernetes_hold_packages | bool
+
+- name: Upgrade kubelet and kubectl
+  ansible.builtin.dnf:
+    name:
+      - kubelet
+      - kubectl
+    state: latest # noqa package-latest
+    disable_excludes: kubernetes
+  become: true
+
+- name: Re-add the version lock on kubelet and kubectl
+  ansible.builtin.command: dnf versionlock add kubelet kubectl
+  become: true
+  register: kubernetes_upgrade_lock_result
+  changed_when: "'Adding versionlock' in kubernetes_upgrade_lock_result.stdout"
+  when: kubernetes_hold_packages | bool

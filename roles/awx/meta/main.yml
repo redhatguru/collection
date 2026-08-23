@@ -1,0 +1,10 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: awx
+  author: Guido Martens
+  description: Deploy AWX on Kubernetes via the AWX Operator, using an external PostgreSQL database
+  license: "license (BSD, MIT)"
+  min_ansible_version: "2.15"
+  galaxy_tags: []

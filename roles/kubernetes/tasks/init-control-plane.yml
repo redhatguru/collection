@@ -1,0 +1,90 @@
+---
+- name: Detect installed kubeadm version
+  ansible.builtin.command: kubeadm version -o short
+  become: true
+  changed_when: false
+  register: kubernetes_kubeadm_version
+
+- name: Generate kubeadm init configuration
+  ansible.builtin.template:
+    src: kubeadm-init-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-init-config.yaml
+    mode: "0600"
+  become: true
+
+- name: Initialize the control plane
+  ansible.builtin.command:
+    cmd: >-
+      kubeadm init
+      --config /etc/kubernetes/kubeadm-init-config.yaml
+      {{ '--upload-certs' if kubernetes_use_ha_endpoint else '' }}
+  become: true
+  register: kubernetes_kubeadm_init
+  args:
+    creates: /etc/kubernetes/admin.conf
+
+- name: Create kube directory for the connecting user
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: "0700"
+
+- name: Copy admin kubeconfig for the connecting user
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_env.USER }}"
+    mode: "0600"
+  become: true
+
+- name: Install the Calico CNI
+  ansible.builtin.command: >-
+    kubectl apply -f
+    https://raw.githubusercontent.com/projectcalico/calico/v{{ kubernetes_calico_version }}/manifests/calico.yaml
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_calico_apply
+  retries: 10
+  delay: 10
+  until: kubernetes_calico_apply.rc == 0
+
+- name: Remove the control-plane taint on single-node clusters
+  ansible.builtin.command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: kubernetes_untaint
+  changed_when: "'untainted' in kubernetes_untaint.stdout"
+  failed_when:
+    - kubernetes_untaint.rc != 0
+    - "'not found' not in kubernetes_untaint.stderr"
+  when: not kubernetes_use_ha_endpoint
+
+- name: Generate join commands for additional nodes
+  when: kubernetes_use_ha_endpoint
+  block:
+    - name: Generate the worker join command
+      ansible.builtin.command: kubeadm token create --print-join-command
+      become: true
+      changed_when: false
+      register: kubernetes_worker_join_command_result
+
+    - name: Set the worker join command fact
+      ansible.builtin.set_fact:
+        kubernetes_worker_join_command: "{{ kubernetes_worker_join_command_result.stdout }}"
+
+    - name: Generate a fresh control-plane certificate key
+      ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+      become: true
+      changed_when: false
+      register: kubernetes_upload_certs_result
+
+    - name: Set the control-plane join command fact
+      ansible.builtin.set_fact:
+        kubernetes_control_plane_join_command: >-
+          {{ kubernetes_worker_join_command_result.stdout }}
+          --control-plane
+          --certificate-key {{ kubernetes_upload_certs_result.stdout_lines | last }}

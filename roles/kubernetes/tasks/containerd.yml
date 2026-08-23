@@ -1,0 +1,26 @@
+---
+- name: Generate default containerd configuration
+  ansible.builtin.command: containerd config default
+  become: true
+  changed_when: false
+  register: kubernetes_containerd_default_config
+
+- name: Write containerd configuration with the systemd cgroup driver enabled
+  ansible.builtin.copy:
+    content: >-
+      {{ kubernetes_containerd_default_config.stdout
+         | replace('SystemdCgroup = false', 'SystemdCgroup = true') }}
+    dest: /etc/containerd/config.toml
+    mode: "0644"
+  become: true
+  notify: Restart containerd
+
+- name: Apply containerd configuration now
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure containerd is enabled and running
+  ansible.builtin.systemd:
+    name: containerd
+    state: started
+    enabled: true
+  become: true

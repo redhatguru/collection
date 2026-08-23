@@ -36,6 +36,8 @@ ansible-galaxy collection install -r requirements.yml
 | [`k3s`](roles/k3s) | Install a single-node K3s cluster without Traefik, plus `kubectl`. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`postgresql`](roles/postgresql) | Install and configure PostgreSQL, including database and user creation and `pg_hba.conf`/`postgresql.conf` hardening. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`patching`](roles/patching) | Update all packages via `dnf`/`apt`, rebooting only when a reboot is actually required and explicitly allowed (`patching_reboot: true`). | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
+| [`kubernetes`](roles/kubernetes) | Install Kubernetes via `kubeadm` (containerd, Calico), as a single node or a `masters`/`workers` cluster, plus the Dashboard, opt-in hardening, and an opt-in rolling upgrade. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
+| [`awx`](roles/awx) | Deploy AWX on an existing Kubernetes cluster via the AWX Operator, using an external PostgreSQL database. | Any host with the `kubernetes` role already applied |
 
 See each role's README for its full variable list and an example playbook.
 
@@ -47,9 +49,11 @@ See each role's README for its full variable list and an example playbook.
 
 ## Testing
 
-Every role has a Molecule scenario (`roles/<role>/molecule/default`) that runs the
-role in VirtualBox VMs via Vagrant on Rocky Linux 9, Rocky Linux 10, Ubuntu 24.04
-and Ubuntu 26.04. From inside a role directory:
+Every role has at least a `roles/<role>/molecule/default` scenario that runs it
+in VirtualBox VMs via Vagrant, typically across Rocky Linux 9, Rocky Linux 10,
+Ubuntu 24.04 and Ubuntu 26.04 (see each role's README for its exact scenarios —
+`kubernetes` also has multi-node cluster scenarios, and `awx` a two-VM scenario
+on Ubuntu 26.04). From inside a role directory:
 
 ```bash
 pip install molecule "molecule-plugins[vagrant]" python-vagrant

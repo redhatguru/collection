@@ -1,0 +1,16 @@
+---
+- name: Template the default-deny NetworkPolicy
+  ansible.builtin.template:
+    src: default-deny-networkpolicy.yaml.j2
+    dest: /etc/kubernetes/default-deny-networkpolicy.yaml
+    mode: "0600"
+  become: true
+  when: kubernetes_harden_network_policy | bool
+
+- name: Apply the default-deny NetworkPolicy
+  ansible.builtin.command: kubectl apply -f /etc/kubernetes/default-deny-networkpolicy.yaml
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: kubernetes_harden_network_policy | bool

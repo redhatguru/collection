@@ -1,0 +1,37 @@
+---
+- name: Wait for the control-plane endpoint to be reachable
+  ansible.builtin.wait_for:
+    host: "{{ kubernetes_control_plane_endpoint }}"
+    port: 6443
+    timeout: 180
+
+- name: Join this node to the cluster as a worker
+  when: hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] | length > 0
+  block:
+    - name: Attempt to join this node to the cluster
+      ansible.builtin.command: "{{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}"
+      become: true
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+  rescue:
+    - name: Clean up the failed join attempt
+      ansible.builtin.command: kubeadm reset -f
+      become: true
+      changed_when: true
+
+    - name: Remove any stale Node object left behind by the failed attempt
+      ansible.builtin.command: "kubectl delete node {{ inventory_hostname }} --ignore-not-found"
+      delegate_to: "{{ groups['masters'][0] }}"
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      become: true
+      changed_when: true
+
+    - name: Give the control plane a moment before retrying
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Retry joining this node to the cluster
+      ansible.builtin.command: "{{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}"
+      become: true
+      changed_when: true
