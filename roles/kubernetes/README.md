@@ -3,8 +3,8 @@ kubernetes
 
 Installs Kubernetes via `kubeadm` (containerd runtime, Calico CNI) on Rocky
 Linux 9/10 or Ubuntu 24.04/26.04, as either a single all-in-one node or a
-multi-node cluster, and installs the Kubernetes Dashboard and some cluster
-hardening on top.
+multi-node cluster, and installs the Kubernetes Dashboard, the
+ingress-nginx Ingress controller, and some cluster hardening on top.
 
 Which mode a host gets is driven entirely by the inventory groups it's a
 member of:
@@ -77,6 +77,15 @@ Role Variables
 - `kubernetes_dashboard_admin_user` (default `true`) — the dashboard's
   service account is bound to `cluster-admin`. Set to `false` to bind it to
   the built-in read-only `view` ClusterRole instead.
+- `kubernetes_ingress_enabled` (default `true`) — install the ingress-nginx
+  Ingress controller, so other roles (e.g. `awx`) can expose services on a
+  real hostname instead of a raw NodePort.
+- `kubernetes_ingress_version` (default `"1.11.3"`) — ingress-nginx release
+  to install.
+- `kubernetes_ingress_http_node_port` / `kubernetes_ingress_https_node_port`
+  (default `30880` / `30943`) — fixed NodePorts the ingress-nginx
+  controller's Service is patched to use, so they're predictable enough to
+  open on the firewall and to point DNS records at.
 - `kubernetes_hardening_enabled` (default `true`) — master switch for all
   hardening below.
 - `kubernetes_harden_kubelet` (default `true`) — disables kubelet anonymous

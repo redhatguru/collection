@@ -10,7 +10,12 @@ bundled one.
 Installs the AWX Operator into `awx_namespace` via its published kustomize
 manifests, creates the admin-password and postgres-configuration secrets
 the operator expects, then applies an `AWX` custom resource and waits for
-it to become available.
+it to become available. At the end of the run it prints an access report
+(URL, admin username, admin password). The URL is, in order: `awx_ingress_host`
+when `awx_ingress_enabled` is true; otherwise it depends on
+`awx_service_type` — the current host's address and `awx_nodeport_port` for
+`NodePort`, the provisioned external IP/hostname for `LoadBalancer` (polled
+for up to two minutes), or a `kubectl port-forward` command for `ClusterIP`.
 
 Requirements
 ------------
@@ -50,6 +55,19 @@ Role Variables
   exposed: `ClusterIP`, `NodePort` or `LoadBalancer`.
 - `awx_nodeport_port` (default `30080`) — only used when `awx_service_type`
   is `NodePort`.
+- `awx_ingress_enabled` (default `false`) — expose AWX through an Ingress
+  instead of (or on top of) `awx_service_type`, via the ingress-nginx
+  controller installed by the `kubernetes` role
+  (`kubernetes_ingress_enabled`).
+- `awx_ingress_host` (no default, must be set when `awx_ingress_enabled` is
+  true) — the DNS hostname AWX is reachable on. Point an A/CNAME record at
+  the Kubernetes host(s) (or `kubernetes_ingress_http_node_port` /
+  `kubernetes_ingress_https_node_port` behind a load balancer).
+- `awx_ingress_class_name` (default `"nginx"`) — matches the `IngressClass`
+  the `kubernetes` role's ingress-nginx controller registers.
+- `awx_ingress_tls_secret` (default `""`) — name of a TLS secret already
+  present in `awx_namespace` to terminate HTTPS with. Left empty, the
+  Ingress is HTTP-only.
 - `awx_admin_user` (default `"admin"`) — AWX superuser account created on
   first boot.
 - `awx_admin_password` (default `"ChangeMe123!"`) — password for
@@ -102,7 +120,7 @@ Example Playbook
   hosts: k8s_server
   become: true
   vars:
-    awx_postgres_host: "{{ hostvars['postgres_server']['ansible_default_ipv4']['address'] }}"
+    awx_postgres_host: "{{ groups['postgres_server'][0] }}"
     awx_postgres_user: awx
     awx_postgres_password: "S3cretPassword"
     awx_admin_password: "AnotherS3cretPassword"
@@ -138,7 +156,7 @@ Two independent things can be upgraded:
   hosts: k8s_server
   become: true
   vars:
-    awx_postgres_host: "{{ hostvars['postgres_server']['ansible_default_ipv4']['address'] }}"
+    awx_postgres_host: "{{ groups['postgres_server'][0] }}"
     awx_operator_version: "2.19.1"
     awx_image_version: "24.6.1"
 

@@ -1,0 +1,34 @@
+---
+- name: Install the ingress-nginx controller
+  ansible.builtin.command: >-
+    kubectl apply -f
+    https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v{{ kubernetes_ingress_version }}/deploy/static/provider/baremetal/deploy.yaml
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_ingress_apply
+  retries: 10
+  delay: 10
+  until: kubernetes_ingress_apply.rc == 0
+
+- name: Pin the ingress-nginx controller NodePorts
+  ansible.builtin.command: >-
+    kubectl -n ingress-nginx patch svc ingress-nginx-controller -p
+    '{"spec": {"ports": [{"name": "http", "port": 80, "targetPort": "http",
+    "nodePort": {{ kubernetes_ingress_http_node_port }}}, {"name": "https",
+    "port": 443, "targetPort": "https", "nodePort": {{ kubernetes_ingress_https_node_port }}}]}}'
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Wait for the ingress-nginx controller deployment to become available
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Available deployment/ingress-nginx-controller
+    -n ingress-nginx --timeout=300s
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+...

@@ -36,3 +36,30 @@
   when:
     - ansible_facts['os_family'] == 'RedHat'
     - kubernetes_dashboard_enabled | bool
+
+- name: Allow the ingress-nginx NodePorts from the public internet (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  become: true
+  loop:
+    - "{{ kubernetes_ingress_http_node_port }}"
+    - "{{ kubernetes_ingress_https_node_port }}"
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - kubernetes_ingress_enabled | bool
+
+- name: Allow the ingress-nginx NodePorts from the public internet (firewalld)
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop:
+    - "{{ kubernetes_ingress_http_node_port }}"
+    - "{{ kubernetes_ingress_https_node_port }}"
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - kubernetes_ingress_enabled | bool

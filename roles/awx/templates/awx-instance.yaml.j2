@@ -9,6 +9,14 @@ spec:
 {% if awx_service_type == 'NodePort' %}
   nodeport_port: {{ awx_nodeport_port }}
 {% endif %}
+{% if awx_ingress_enabled %}
+  ingress_type: Ingress
+  hostname: {{ awx_ingress_host }}
+  ingress_class_name: {{ awx_ingress_class_name }}
+{% if awx_ingress_tls_secret %}
+  ingress_tls_secret: {{ awx_ingress_tls_secret }}
+{% endif %}
+{% endif %}
   admin_user: {{ awx_admin_user }}
   admin_password_secret: {{ awx_name }}-admin-password
   postgres_configuration_secret: {{ awx_name }}-postgres-configuration
