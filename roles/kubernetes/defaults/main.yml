@@ -63,3 +63,14 @@ kubernetes_harden_network_policy: true
 # the single node). Cluster-internal traffic between nodes is always
 # allowed regardless of this setting.
 kubernetes_public_access_enabled: true
+
+# ingress-nginx: the only Ingress controller this role installs. Lets
+# other roles (e.g. awx) expose services on a real hostname instead of a
+# raw NodePort.
+kubernetes_ingress_enabled: true
+kubernetes_ingress_version: "1.11.3"
+# Fixed NodePorts the ingress-nginx controller's Service is patched to use
+# for HTTP/HTTPS, so they're predictable enough to open on the firewall
+# (see kubernetes_public_access_enabled) and to point DNS records at.
+kubernetes_ingress_http_node_port: 30880
+kubernetes_ingress_https_node_port: 30943

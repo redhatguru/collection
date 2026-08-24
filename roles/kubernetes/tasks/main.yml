@@ -37,6 +37,14 @@
     - (inventory_hostname in (groups['single'] | default([]))) or
       (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
 
+- name: Install the ingress-nginx controller
+  ansible.builtin.include_tasks: ingress.yml
+  tags: ingress
+  when:
+    - kubernetes_ingress_enabled | bool
+    - (inventory_hostname in (groups['single'] | default([]))) or
+      (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
+
 - name: Apply cluster hardening
   ansible.builtin.include_tasks: hardening.yml
   tags: hardening

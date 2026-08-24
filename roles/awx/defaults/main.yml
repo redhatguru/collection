@@ -26,6 +26,17 @@ awx_service_type: "NodePort"
 # Only used when awx_service_type is "NodePort".
 awx_nodeport_port: 30080
 
+# Expose AWX through an Ingress instead of (or on top of) awx_service_type,
+# via the ingress-nginx controller installed by the kubernetes role
+# (kubernetes_ingress_enabled). awx_ingress_host must be set when this is
+# true. awx_ingress_tls_secret, if set, names a TLS secret already present
+# in awx_namespace to terminate HTTPS with; left empty, the Ingress is
+# HTTP-only.
+awx_ingress_enabled: false
+awx_ingress_host: ""
+awx_ingress_class_name: "nginx"
+awx_ingress_tls_secret: ""
+
 # AWX admin (superuser) account, created on first boot.
 awx_admin_user: "admin"
 awx_admin_password: "ChangeMe123!"

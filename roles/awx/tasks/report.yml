@@ -1,0 +1,52 @@
+---
+- name: Determine the LoadBalancer address
+  ansible.builtin.command: >-
+    kubectl get svc {{ awx_name }}-service -n {{ awx_namespace }}
+    -o jsonpath="{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: false
+  failed_when: false
+  register: awx_report_lb_address
+  retries: 12
+  delay: 10
+  until: awx_report_lb_address.stdout | length > 0
+  when:
+    - not (awx_ingress_enabled | bool)
+    - awx_service_type == 'LoadBalancer'
+
+- name: Set the access URL (Ingress)
+  ansible.builtin.set_fact:
+    awx_report_url: >-
+      {{ 'https' if awx_ingress_tls_secret else 'http' }}://{{ awx_ingress_host }}
+  when: awx_ingress_enabled | bool
+
+- name: Set the access URL (NodePort)
+  ansible.builtin.set_fact:
+    awx_report_url: "http://{{ ansible_default_ipv4.address }}:{{ awx_nodeport_port }}"
+  when:
+    - not (awx_ingress_enabled | bool)
+    - awx_service_type == 'NodePort'
+
+- name: Set the access URL (LoadBalancer)
+  ansible.builtin.set_fact:
+    awx_report_url: "http://{{ awx_report_lb_address.stdout }}"
+  when:
+    - not (awx_ingress_enabled | bool)
+    - awx_service_type == 'LoadBalancer'
+    - awx_report_lb_address.stdout | default('') | length > 0
+
+- name: Set the access URL (fallback)
+  ansible.builtin.set_fact:
+    awx_report_url: >-
+      not exposed externally (service_type: {{ awx_service_type }}); use:
+      kubectl port-forward svc/{{ awx_name }}-service -n {{ awx_namespace }} 8080:80
+  when: awx_report_url is not defined
+
+- name: Print access report
+  ansible.builtin.debug:
+    msg:
+      - "URL: {{ awx_report_url }}"
+      - "Username: {{ awx_admin_user }}"
+      - "Password: {{ awx_admin_password }}"

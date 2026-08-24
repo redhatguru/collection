@@ -27,6 +27,10 @@
     # How the AWX web service is exposed: ClusterIP, NodePort or LoadBalancer.
     awx_service_type: "NodePort"
     awx_nodeport_port: 30080
+    # To expose AWX on a real hostname instead, via the ingress-nginx
+    # controller the kubernetes role installs, use this instead:
+    #   awx_ingress_enabled: true
+    #   awx_ingress_host: "awx.example.com"
     # AWX superuser account created on first boot.
     awx_admin_user: "admin"
     awx_admin_password: "AnotherChangeMe123!"
