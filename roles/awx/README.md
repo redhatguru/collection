@@ -120,7 +120,7 @@ Example Playbook
   hosts: k8s_server
   become: true
   vars:
-    awx_postgres_host: "{{ hostvars['postgres_server']['ansible_default_ipv4']['address'] }}"
+    awx_postgres_host: "{{ groups['postgres_server'][0] }}"
     awx_postgres_user: awx
     awx_postgres_password: "S3cretPassword"
     awx_admin_password: "AnotherS3cretPassword"
@@ -156,7 +156,7 @@ Two independent things can be upgraded:
   hosts: k8s_server
   become: true
   vars:
-    awx_postgres_host: "{{ hostvars['postgres_server']['ansible_default_ipv4']['address'] }}"
+    awx_postgres_host: "{{ groups['postgres_server'][0] }}"
     awx_operator_version: "2.19.1"
     awx_image_version: "24.6.1"
 

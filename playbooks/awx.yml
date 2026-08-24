@@ -25,20 +25,26 @@
     # the operator creates for it.
     awx_name: "awx"
     # How the AWX web service is exposed: ClusterIP, NodePort or LoadBalancer.
-    awx_service_type: "NodePort"
-    awx_nodeport_port: 30080
-    # To expose AWX on a real hostname instead, via the ingress-nginx
-    # controller the kubernetes role installs, use this instead:
-    #   awx_ingress_enabled: true
-    #   awx_ingress_host: "awx.example.com"
+    # ClusterIP here since the Ingress below is what actually exposes it.
+    awx_service_type: "ClusterIP"
+    # Expose AWX on a real hostname via the ingress-nginx controller the
+    # kubernetes role installs (kubernetes_ingress_enabled). Point an
+    # A/CNAME record at the Kubernetes host(s) — or at whatever's in front
+    # of them — on kubernetes_ingress_http_node_port/https_node_port.
+    awx_ingress_enabled: true
+    awx_ingress_host: "awx.devlab.local"
     # AWX superuser account created on first boot.
     awx_admin_user: "admin"
     awx_admin_password: "AnotherChangeMe123!"
     awx_replicas: 1
     # External PostgreSQL database AWX connects to — the host running the
     # postgresql role, and the same user/database/password configured in
-    # playbooks/postgresql.yml.
-    awx_postgres_host: "{{ hostvars[groups['postgresql'][0]]['ansible_default_ipv4']['address'] }}"
+    # playbooks/postgresql.yml. Uses the inventory hostname directly (must
+    # be a real, cluster-resolvable DNS name) rather than resolving it to
+    # an IP via hostvars/facts: this playbook only targets single:masters,
+    # so Ansible never gathers facts for the postgresql host in this run,
+    # and hostvars[...]['ansible_default_ipv4'] would fail.
+    awx_postgres_host: "{{ groups['postgresql'][0] }}"
     awx_postgres_database: "awx"
     awx_postgres_user: "awx"
     awx_postgres_password: "ChangeMe123!"
