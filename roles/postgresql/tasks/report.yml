@@ -1,0 +1,7 @@
+---
+- name: Print database report
+  ansible.builtin.debug:
+    msg:
+      - "Database: {{ postgresql_database_name }}"
+      - "Users: {{ postgresql_users | map(attribute='name') | join(', ') }}"
+...

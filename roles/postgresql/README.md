@@ -6,12 +6,13 @@ database and one or more users with full privileges on it, applies some
 basic hardening (`pg_hba.conf` access rule, `listen_addresses`, `postgres`
 superuser password), and schedules automatic `pg_dump` backups.
 
-The tasks are split into five tags you can run selectively:
+The tasks are split into six tags you can run selectively:
 - `install` — install PostgreSQL and start the service
 - `createdb` — create the database
 - `createusr` — create the users and grant them privileges on the database
 - `hardening` — apply the `pg_hba.conf`/`postgresql.conf` and password changes
 - `backup` — create the backup directory and schedule the backup cron job
+- `report` — print the database name and the users created on it
 
 Requirements
 ------------
@@ -96,6 +97,7 @@ Example Playbook
         - createusr
         - hardening
         - backup
+        - report
 ```
 
 Testing

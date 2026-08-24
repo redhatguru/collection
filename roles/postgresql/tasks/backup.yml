@@ -11,6 +11,11 @@
 - name: Schedule a periodic pg_dump backup
   ansible.builtin.cron:
     name: "PostgreSQL backup of {{ postgresql_database_name }}"
+    # Written to /etc/cron.d instead of postgres's own crontab: the
+    # postgres service account has a login shell that isn't allowed to
+    # run crontab itself (PAM/cron.allow), but cron.d entries are read
+    # directly by the daemon regardless of the target user's login rights.
+    cron_file: "postgresql-backup-{{ postgresql_database_name }}"
     user: postgres
     minute: "{{ postgresql_backup_minute }}"
     hour: "{{ postgresql_backup_hour }}"

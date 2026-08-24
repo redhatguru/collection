@@ -23,4 +23,9 @@
   ansible.builtin.import_tasks:
     file: backup.yml
   tags: backup
+
+- name: Print database report
+  ansible.builtin.import_tasks:
+    file: report.yml
+  tags: report
 ...
