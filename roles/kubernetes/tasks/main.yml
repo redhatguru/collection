@@ -1,4 +1,11 @@
 ---
+# Materialized into a real fact (rather than left as a live-templated
+# default) so other hosts can read it reliably via hostvars, e.g. when
+# masters/workers resolve kubernetes_control_plane_endpoint.
+- name: Materialize the node's advertise/join IP as a fact
+  ansible.builtin.set_fact:
+    kubernetes_node_ip: "{{ kubernetes_node_ip }}"
+
 - name: Prepare host for Kubernetes
   ansible.builtin.include_tasks: prerequisites.yml
   tags: prerequisites
@@ -35,6 +42,21 @@
   tags: hardening
   when:
     - kubernetes_hardening_enabled | bool
+    - (inventory_hostname in (groups['single'] | default([]))) or
+      (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
+
+- name: Open control-plane ports to the public internet
+  ansible.builtin.include_tasks: firewall-public.yml
+  tags: firewall
+  when:
+    - kubernetes_public_access_enabled | bool
+    - (inventory_hostname in (groups['single'] | default([]))) or
+      (inventory_hostname in (groups['masters'] | default([])))
+
+- name: Print cluster report
+  ansible.builtin.include_tasks: report.yml
+  tags: report
+  when:
     - (inventory_hostname in (groups['single'] | default([]))) or
       (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
 

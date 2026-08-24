@@ -1,0 +1,36 @@
+---
+- name: Gather cluster nodes and health
+  ansible.builtin.command: kubectl get nodes -o wide
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_report_nodes
+
+- name: Create a dashboard access token
+  ansible.builtin.command: >-
+    kubectl -n kubernetes-dashboard create token dashboard-user
+    --duration={{ kubernetes_dashboard_token_duration }}
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_report_dashboard_token
+  when: kubernetes_dashboard_enabled | bool
+
+- name: Print cluster report
+  ansible.builtin.debug:
+    msg: >-
+      {{
+        ['Nodes (STATUS column doubles as cluster health):', ''] +
+        kubernetes_report_nodes.stdout_lines +
+        (
+          [
+            '',
+            'Dashboard: https://' + kubernetes_node_ip + ':' +
+              (kubernetes_dashboard_node_port | string) + '/',
+            'Token: ' + kubernetes_report_dashboard_token.stdout
+          ] if kubernetes_dashboard_enabled | bool
+          else ['', 'Dashboard: disabled (kubernetes_dashboard_enabled: false)']
+        )
+      }}

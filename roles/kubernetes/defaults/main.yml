@@ -42,6 +42,12 @@ kubernetes_dashboard_version: "2.7.0"
 # When true, the dashboard service account is bound to cluster-admin (handy
 # for a lab). When false, it's bound to the built-in read-only "view" role.
 kubernetes_dashboard_admin_user: true
+# NodePort the Dashboard is exposed on for direct browser access.
+kubernetes_dashboard_node_port: 30443
+# Validity of the access token generated for the report (see
+# kubernetes_public_access_enabled below); re-run
+# `kubectl -n kubernetes-dashboard create token dashboard-user` for a new one.
+kubernetes_dashboard_token_duration: "24h"
 
 # Hardening. kubernetes_hardening_enabled is the master switch; the two
 # sub-toggles below only take effect while it's true.
@@ -51,3 +57,9 @@ kubernetes_hardening_enabled: true
 kubernetes_harden_kubelet: true
 # Applies a default-deny NetworkPolicy in the default namespace.
 kubernetes_harden_network_policy: true
+
+# Opens the API server (6443) and, when the Dashboard is enabled, its
+# NodePort to the public internet on every control-plane node (masters, or
+# the single node). Cluster-internal traffic between nodes is always
+# allowed regardless of this setting.
+kubernetes_public_access_enabled: true
