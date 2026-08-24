@@ -18,4 +18,9 @@
   ansible.builtin.import_tasks:
     file: hardening.yml
   tags: hardening
+
+- name: Configure automatic PostgreSQL backups
+  ansible.builtin.import_tasks:
+    file: backup.yml
+  tags: backup
 ...

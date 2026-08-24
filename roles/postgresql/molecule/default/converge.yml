@@ -3,8 +3,11 @@
   hosts: all
   become: true
   vars:
-    postgresql_user: molecule_user
-    postgresql_user_password: molecule_pass
+    postgresql_users:
+      - name: molecule_user
+        password: molecule_pass
+      - name: molecule_user2
+        password: molecule_pass2
     postgresql_database_name: molecule_db
     postgresql_root_password: molecule_root_pass
   tasks:

@@ -44,6 +44,15 @@
     update_cache: true
   become: true
 
+- name: Open ufw port for PostgreSQL
+  community.general.ufw:
+    rule: allow
+    port: "{{ postgresql_port }}"
+    proto: tcp
+    from_ip: "{{ postgresql_allow_subnet }}"
+  become: true
+  when: ansible_facts['virtualization_type'] != 'docker'
+
 - name: Ensure PostgreSQL service is running
   ansible.builtin.service:
     name: postgresql
