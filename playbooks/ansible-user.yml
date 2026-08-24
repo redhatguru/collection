@@ -1,0 +1,25 @@
+---
+- name: Create the ansible user with passwordless sudo
+  hosts: all
+  become: true
+  vars:
+    bootstrap_user: ansible
+    bootstrap_shell: /bin/bash
+    bootstrap_user_password: changeme
+
+  tasks:
+    - name: Create the user
+      ansible.builtin.user:
+        name: "{{ bootstrap_user }}"
+        shell: "{{ bootstrap_shell }}"
+        password: "{{ bootstrap_user_password | password_hash('sha512') }}"
+        create_home: true
+
+    - name: Grant passwordless sudo
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ bootstrap_user }}"
+        content: "{{ bootstrap_user }} ALL=(ALL) NOPASSWD: ALL\n"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "visudo -cf %s"

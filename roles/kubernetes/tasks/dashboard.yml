@@ -34,3 +34,13 @@
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: false
+
+- name: Expose the dashboard via a NodePort
+  ansible.builtin.command: >-
+    kubectl -n kubernetes-dashboard patch svc kubernetes-dashboard -p
+    '{"spec": {"type": "NodePort", "ports": [{"port": 443, "targetPort": 8443,
+    "nodePort": {{ kubernetes_dashboard_node_port }}}]}}'
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false

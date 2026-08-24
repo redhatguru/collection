@@ -1,4 +1,16 @@
 ---
+- name: Allow full traffic from other cluster nodes through ufw
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ hostvars[item]['kubernetes_node_ip'] }}"
+  become: true
+  loop: "{{ (groups['single'] | default([])) +
+    (groups['masters'] | default([])) +
+    (groups['workers'] | default([])) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: item != inventory_hostname
+
 - name: Install prerequisite packages
   ansible.builtin.apt:
     name:

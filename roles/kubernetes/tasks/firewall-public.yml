@@ -1,0 +1,38 @@
+---
+- name: Allow the API server from the public internet (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "6443"
+    proto: tcp
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Allow the API server from the public internet (firewalld)
+  ansible.posix.firewalld:
+    port: "6443/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Allow the dashboard NodePort from the public internet (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ kubernetes_dashboard_node_port }}"
+    proto: tcp
+  become: true
+  when:
+    - ansible_facts['os_family'] == 'Debian'
+    - kubernetes_dashboard_enabled | bool
+
+- name: Allow the dashboard NodePort from the public internet (firewalld)
+  ansible.posix.firewalld:
+    port: "{{ kubernetes_dashboard_node_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - kubernetes_dashboard_enabled | bool
