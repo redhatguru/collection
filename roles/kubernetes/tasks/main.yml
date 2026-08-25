@@ -29,6 +29,12 @@
   tags: cluster
   when: inventory_hostname in (groups['workers'] | default([]))
 
+- name: Tune etcd/kube-apiserver for slow disks
+  ansible.builtin.include_tasks: etcd-tuning.yml
+  tags: etcd-tuning
+  when: (inventory_hostname in (groups['single'] | default([]))) or
+    (inventory_hostname in (groups['masters'] | default([])))
+
 - name: Install Kubernetes Dashboard
   ansible.builtin.include_tasks: dashboard.yml
   tags: dashboard

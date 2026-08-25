@@ -27,6 +27,27 @@ kubernetes_control_plane_endpoint: >-
 # Pin kubelet/kubeadm/kubectl so a generic OS package update can't bump them.
 kubernetes_hold_packages: true
 
+# etcd is very sensitive to slow disk fsync latency: on underpowered/shared
+# storage, requests routinely take well over etcd's 100ms-heartbeat/1000ms
+# -election-timeout defaults, causing spurious leader elections and
+# kube-apiserver/etcd instability (visible as high restart counts on the
+# control-plane static pods, and things like the AWX Operator losing its
+# leader-election lease). These raise etcd's tolerance for that latency;
+# only lower them if you know the underlying disk is genuinely fast.
+# Applied at kubeadm init time via ClusterConfiguration, so they take
+# effect on every control-plane node (join inherits the stored config).
+kubernetes_etcd_heartbeat_interval: "250"
+kubernetes_etcd_election_timeout: "2500"
+# How long kube-apiserver waits on a single etcd request before giving up.
+kubernetes_apiserver_etcd_timeout: "5s"
+
+# Seconds to wait for control-plane/Dashboard/ingress-nginx readiness
+# (control-plane endpoint reachability, "kubectl wait --for=condition
+# =Available", and "kubectl drain" during an upgrade). Generous by default
+# so slow disk I/O (see kubernetes_etcd_heartbeat_interval above) doesn't
+# turn into a hard failure on its own.
+kubernetes_wait_timeout: 600
+
 # Target minor version for a rolling upgrade (tag "upgrade", opt-in only —
 # see tasks/upgrade.yml). Defaults to kubernetes_version so an accidental
 # run without overriding it is a no-op rather than a downgrade attempt.

@@ -12,6 +12,14 @@ controlPlaneEndpoint: "{{ kubernetes_control_plane_endpoint }}:6443"
 {% endif %}
 networking:
   podSubnet: {{ kubernetes_pod_network_cidr }}
+etcd:
+  local:
+    extraArgs:
+      heartbeat-interval: "{{ kubernetes_etcd_heartbeat_interval }}"
+      election-timeout: "{{ kubernetes_etcd_election_timeout }}"
+apiServer:
+  extraArgs:
+    etcd-request-timeout: "{{ kubernetes_apiserver_etcd_timeout }}"
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

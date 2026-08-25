@@ -10,6 +10,10 @@
     kubernetes_hardening_enabled: true
     kubernetes_harden_kubelet: true
     kubernetes_harden_network_policy: true
+    kubernetes_etcd_heartbeat_interval: "250"
+    kubernetes_etcd_election_timeout: "2500"
+    kubernetes_apiserver_etcd_timeout: "10s"
+    kubernetes_wait_timeout: 600
 
   tasks:
     - name: Kubernetes
