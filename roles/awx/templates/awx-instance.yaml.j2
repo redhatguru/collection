@@ -21,6 +21,27 @@ spec:
   admin_password_secret: {{ awx_name }}-admin-password
   postgres_configuration_secret: {{ awx_name }}-postgres-configuration
   replicas: {{ awx_replicas }}
+  task_resource_requirements:
+    requests:
+      cpu: {{ awx_task_cpu_request }}
+      memory: {{ awx_task_mem_request }}
+    limits:
+      cpu: {{ awx_task_cpu_limit }}
+      memory: {{ awx_task_mem_limit }}
+  web_resource_requirements:
+    requests:
+      cpu: {{ awx_web_cpu_request }}
+      memory: {{ awx_web_mem_request }}
+    limits:
+      cpu: {{ awx_web_cpu_limit }}
+      memory: {{ awx_web_mem_limit }}
+  ee_resource_requirements:
+    requests:
+      cpu: {{ awx_ee_cpu_request }}
+      memory: {{ awx_ee_mem_request }}
+    limits:
+      cpu: {{ awx_ee_cpu_limit }}
+      memory: {{ awx_ee_mem_limit }}
 {% if awx_image_version %}
   image_version: "{{ awx_image_version }}"
 {% endif %}
