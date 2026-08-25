@@ -73,6 +73,16 @@ Role Variables
 - `awx_admin_password` (default `"ChangeMe123!"`) — password for
   `awx_admin_user`. Change this.
 - `awx_replicas` (default `1`) — number of AWX replicas.
+- `awx_task_cpu_request` / `awx_task_mem_request` / `awx_task_cpu_limit` /
+  `awx_task_mem_limit` (default `"100m"` / `"128Mi"` / `"2000m"` / `"4Gi"`)
+  — CPU/memory requests and limits for the `awx-task` container.
+- `awx_web_cpu_request` / `awx_web_mem_request` / `awx_web_cpu_limit` /
+  `awx_web_mem_limit` (default `"100m"` / `"128Mi"` / `"1000m"` / `"4Gi"`)
+  — CPU/memory requests and limits for the `awx-web` container.
+- `awx_ee_cpu_request` / `awx_ee_mem_request` / `awx_ee_cpu_limit` /
+  `awx_ee_mem_limit` (default `"100m"` / `"128Mi"` / `"1000m"` / `"4Gi"`) —
+  CPU/memory requests and limits for the execution-environment containers
+  (job pods) AWX spawns to run jobs.
 - `awx_image_version` (default `""`) — pins the AWX application image tag
   independently of `awx_operator_version`. Empty means "use whatever
   version the installed operator bundles by default". Only used by the
