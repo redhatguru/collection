@@ -26,7 +26,7 @@
 - name: Wait for the ingress-nginx controller deployment to become available
   ansible.builtin.command: >-
     kubectl wait --for=condition=Available deployment/ingress-nginx-controller
-    -n ingress-nginx --timeout=300s
+    -n ingress-nginx --timeout={{ kubernetes_wait_timeout }}s
   become: true
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf

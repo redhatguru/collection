@@ -1,0 +1,53 @@
+---
+# kubeadm only applies etcd/apiServer extraArgs (see
+# kubeadm-init-config.yaml.j2) at "kubeadm init" time — an already
+# -initialized cluster never re-reads that config. These tasks reconcile
+# the same kubernetes_etcd_*/kubernetes_apiserver_etcd_timeout values
+# directly into the running static pod manifests on every run, so
+# existing clusters pick up the disk-latency tolerance too, not just
+# freshly installed ones. Editing a static pod manifest is enough:
+# kubelet watches the directory and restarts the pod on its own.
+- name: Tune etcd heartbeat-interval for disk-latency tolerance
+  ansible.builtin.lineinfile:
+    path: /etc/kubernetes/manifests/etcd.yaml
+    regexp: '^\s*- --heartbeat-interval='
+    insertafter: '^\s*- etcd$'
+    line: "    - --heartbeat-interval={{ kubernetes_etcd_heartbeat_interval }}"
+  become: true
+  register: kubernetes_etcd_heartbeat_patch
+
+- name: Tune etcd election-timeout for disk-latency tolerance
+  ansible.builtin.lineinfile:
+    path: /etc/kubernetes/manifests/etcd.yaml
+    regexp: '^\s*- --election-timeout='
+    insertafter: '^\s*- etcd$'
+    line: "    - --election-timeout={{ kubernetes_etcd_election_timeout }}"
+  become: true
+  register: kubernetes_etcd_election_patch
+
+- name: Tune kube-apiserver etcd-request-timeout for disk-latency tolerance
+  ansible.builtin.lineinfile:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    regexp: '^\s*- --etcd-request-timeout='
+    insertafter: '^\s*- kube-apiserver$'
+    line: "    - --etcd-request-timeout={{ kubernetes_apiserver_etcd_timeout }}"
+  become: true
+  register: kubernetes_apiserver_etcd_timeout_patch
+
+- name: Give kubelet time to notice the manifest change and restart the pods
+  ansible.builtin.pause:
+    seconds: 15
+  when: >-
+    kubernetes_etcd_heartbeat_patch.changed or
+    kubernetes_etcd_election_patch.changed or
+    kubernetes_apiserver_etcd_timeout_patch.changed
+
+- name: Wait for the control-plane endpoint to come back after the manifest change
+  ansible.builtin.wait_for:
+    host: "{{ kubernetes_node_ip }}"
+    port: 6443
+    timeout: "{{ kubernetes_wait_timeout }}"
+  when: >-
+    kubernetes_etcd_heartbeat_patch.changed or
+    kubernetes_etcd_election_patch.changed or
+    kubernetes_apiserver_etcd_timeout_patch.changed

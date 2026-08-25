@@ -16,7 +16,7 @@
       ansible.builtin.wait_for:
         host: "{{ kubernetes_control_plane_endpoint }}"
         port: 6443
-        timeout: 180
+        timeout: "{{ kubernetes_wait_timeout }}"
 
     - name: Join this node to the control plane
       when: hostvars[groups['masters'][0]]['kubernetes_control_plane_join_command'] | length > 0
@@ -25,6 +25,7 @@
           ansible.builtin.command: >-
             {{ hostvars[groups['masters'][0]]['kubernetes_control_plane_join_command'] }}
             --apiserver-advertise-address={{ kubernetes_node_ip }}
+            --timeout {{ kubernetes_wait_timeout }}s
           become: true
           args:
             creates: /etc/kubernetes/kubelet.conf
@@ -58,6 +59,7 @@
           ansible.builtin.command: >-
             {{ hostvars[groups['masters'][0]]['kubernetes_control_plane_join_command'] }}
             --apiserver-advertise-address={{ kubernetes_node_ip }}
+            --timeout {{ kubernetes_wait_timeout }}s
           become: true
           changed_when: true
 

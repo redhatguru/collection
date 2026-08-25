@@ -4,7 +4,15 @@ kubernetes
 Installs Kubernetes via `kubeadm` (containerd runtime, Calico CNI) on Rocky
 Linux 9/10 or Ubuntu 24.04/26.04, as either a single all-in-one node or a
 multi-node cluster, and installs the Kubernetes Dashboard, the
-ingress-nginx Ingress controller, and some cluster hardening on top.
+ingress-nginx Ingress controller, and some cluster hardening on top. At the
+end of the run it prints a report of every node's status plus the restart
+count of each control-plane component (`kube-system`, `tier=control-plane`)
+— a quick way to spot etcd/apiserver instability, which on
+underpowered/shared storage is usually a disk-latency problem (see
+`kubernetes_etcd_heartbeat_interval` below) rather than anything this role
+misconfigured. That tuning is reconciled into the running etcd/kube
+-apiserver static pod manifests on every run (not just applied once at
+`kubeadm init`), so an existing cluster picks up a changed value too.
 
 Which mode a host gets is driven entirely by the inventory groups it's a
 member of:
@@ -68,6 +76,20 @@ Role Variables
 - `kubernetes_hold_packages` (default `true`) — pin kubelet/kubeadm/kubectl
   (`dnf versionlock` / `apt-mark hold`) so a generic OS package update
   can't bump them out from under the cluster.
+- `kubernetes_etcd_heartbeat_interval` / `kubernetes_etcd_election_timeout`
+  (default `"250"` / `"2500"`, ms) — etcd's tolerance for slow disk fsync
+  latency, applied via kubeadm's `ClusterConfiguration` at init time (and
+  inherited by joining control-plane nodes). etcd's own defaults (100/1000)
+  are tuned for fast local disks; on underpowered/shared storage, requests
+  routinely exceed them, causing spurious leader elections and
+  kube-apiserver/etcd instability. Only lower these if the underlying disk
+  is genuinely fast.
+- `kubernetes_apiserver_etcd_timeout` (default `"5s"`) — how long
+  kube-apiserver waits on a single etcd request before giving up.
+- `kubernetes_wait_timeout` (default `600`, seconds) — how long to wait for
+  control-plane/Dashboard/ingress-nginx readiness and `kubeadm init`/`join`/
+  `kubectl drain` to complete. Generous by default for the same slow-disk
+  reason as the etcd settings above.
 - `kubernetes_worker_join_command` / `kubernetes_control_plane_join_command`
   — computed by the role on the first master/single node; do not set these
   yourself.

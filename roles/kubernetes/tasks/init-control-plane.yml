@@ -17,6 +17,7 @@
     cmd: >-
       kubeadm init
       --config /etc/kubernetes/kubeadm-init-config.yaml
+      --timeout {{ kubernetes_wait_timeout }}s
       {{ '--upload-certs' if kubernetes_use_ha_endpoint else '' }}
   become: true
   register: kubernetes_kubeadm_init

@@ -29,7 +29,7 @@
 - name: Wait for the dashboard deployment to become available
   ansible.builtin.command: >-
     kubectl wait --for=condition=Available deployment/kubernetes-dashboard
-    -n kubernetes-dashboard --timeout=480s
+    -n kubernetes-dashboard --timeout={{ kubernetes_wait_timeout }}s
   become: true
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
