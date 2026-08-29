@@ -5,10 +5,13 @@
   vars:
     awx_namespace: "awx"
     awx_operator_version: "2.19.1"
+    awx_operator_kube_rbac_proxy_image: "quay.io/brancz/kube-rbac-proxy:v0.15.0"
     awx_name: "awx"
     awx_service_type: "ClusterIP"
     awx_ingress_enabled: true
     awx_ingress_host: "awx.devlab.local"
+    awx_ingress_class_name: "nginx"
+    awx_ingress_tls_secret: ""
     awx_admin_user: "admin"
     awx_admin_password: "AnotherChangeMe123!"
     awx_replicas: 1
@@ -25,9 +28,12 @@
     awx_ee_cpu_limit: "1000m"
     awx_ee_mem_limit: "4Gi"
     awx_postgres_host: "{{ groups['postgresql'][0] }}"
+    awx_postgres_port: 5432
     awx_postgres_database: "awx"
     awx_postgres_user: "awx"
     awx_postgres_password: "ChangeMe123!"
+    awx_postgres_sslmode: "prefer"
+    awx_wait_timeout: 900
 
   tasks:
     - name: AWX

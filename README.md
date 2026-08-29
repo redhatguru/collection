@@ -9,6 +9,7 @@ General purpose Ansible roles and modules maintained by redhatguru.
   - `community.general` >= 8.0.0
   - `community.postgresql` >= 3.0.0
   - `ansible.posix` >= 1.5.0
+  - `kubernetes.core` >= 3.0.0
 
 ## Installation
 

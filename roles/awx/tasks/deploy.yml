@@ -1,45 +1,45 @@
 ---
-- name: Template the AWX instance manifest
-  ansible.builtin.template:
-    src: awx-instance.yaml.j2
-    dest: /etc/kubernetes/awx-instance.yaml
-    mode: "0600"
-  become: true
-
 - name: Deploy AWX
-  ansible.builtin.command: kubectl apply -f /etc/kubernetes/awx-instance.yaml
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    state: present
+    definition: "{{ lookup('ansible.builtin.template', 'awx-instance.yaml.j2') }}"
   become: true
-  changed_when: false
 
 - name: Wait for the AWX Operator to create the AWX deployments
-  # "kubectl wait" requires the resource to already exist, but the operator
-  # creates them asynchronously after the AWX custom resource is applied
-  # (and only after the migration job it runs first completes), so this has
-  # to be polled for separately first. The operator creates two deployments,
-  # "<name>-web" and "<name>-task", not one named "<name>".
-  ansible.builtin.command: "kubectl get deployment/{{ awx_name }}-{{ item }} -n {{ awx_namespace }}"
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+  # The operator creates "<name>-web"/"<name>-task" asynchronously after
+  # the AWX custom resource is applied (and only after the migration job
+  # it runs first completes), so existence has to be polled for separately
+  # before waiting on a condition makes sense.
+  kubernetes.core.k8s_info:
+    kubeconfig: /etc/kubernetes/admin.conf
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ awx_name }}-{{ item }}"
+    namespace: "{{ awx_namespace }}"
   become: true
-  changed_when: false
   register: awx_deployment_exists
   retries: 60
   delay: 10
-  until: awx_deployment_exists.rc == 0
+  until: awx_deployment_exists.resources | length > 0
   loop:
     - web
     - task
 
 - name: Wait for the AWX deployments to become available
-  ansible.builtin.command: >-
-    kubectl wait --for=condition=Available deployment/{{ awx_name }}-{{ item }}
-    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ awx_name }}-{{ item }}"
+    namespace: "{{ awx_namespace }}"
+    state: present
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: "{{ awx_wait_timeout }}"
   become: true
-  changed_when: false
   loop:
     - web
     - task

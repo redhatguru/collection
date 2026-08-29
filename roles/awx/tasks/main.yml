@@ -18,6 +18,10 @@
     quiet: true
   when: awx_ingress_enabled | bool
 
+- name: Install prerequisites for the kubernetes.core collection
+  ansible.builtin.include_tasks: prerequisites.yml
+  tags: prerequisites
+
 - name: Ensure the AWX namespace exists
   ansible.builtin.include_tasks: namespace.yml
   tags: namespace

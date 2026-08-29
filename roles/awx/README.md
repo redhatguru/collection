@@ -11,11 +11,15 @@ Installs the AWX Operator into `awx_namespace` via its published kustomize
 manifests, creates the admin-password and postgres-configuration secrets
 the operator expects, then applies an `AWX` custom resource and waits for
 it to become available. At the end of the run it prints an access report
-(URL, admin username, admin password). The URL is, in order: `awx_ingress_host`
-when `awx_ingress_enabled` is true; otherwise it depends on
-`awx_service_type` — the current host's address and `awx_nodeport_port` for
-`NodePort`, the provisioned external IP/hostname for `LoadBalancer` (polled
-for up to two minutes), or a `kubectl port-forward` command for `ClusterIP`.
+(URL, whether that URL actually responds, admin username, admin password).
+The URL is, in order: `awx_ingress_host` when `awx_ingress_enabled` is
+true; otherwise it depends on `awx_service_type` — the current host's
+address and `awx_nodeport_port` for `NodePort`, the provisioned external
+IP/hostname for `LoadBalancer` (polled for up to two minutes), or a
+`kubectl port-forward` command for `ClusterIP`. Whenever there's a real
+URL (Ingress/NodePort/LoadBalancer), the report also polls `/api/v2/ping/`
+on it (up to two minutes) and shows whether AWX actually answered —
+non-fatal, so a DNS record that isn't live yet doesn't fail the run.
 
 Requirements
 ------------
@@ -29,11 +33,20 @@ Requirements
 - Outbound internet access from the Kubernetes host (the AWX Operator's
   manifests are fetched from GitHub, and AWX/operator container images are
   pulled from Quay/Docker Hub).
+- The role installs the Python `kubernetes` client on that host itself
+  (`pip`, via the `prerequisites` tag) — it's needed by `kubernetes.core`'s
+  modules, which this role uses for everything except installing the AWX
+  Operator's kustomize manifests (`kubectl apply -k`, which
+  `kubernetes.core.k8s` has no equivalent for).
 
 ### Collections
 
-This role only uses modules built into `ansible-core` (`ansible.builtin.*`),
-so no extra collections need to be installed.
+This role needs `kubernetes.core` (already declared in the collection's own
+`requirements.yml`/`galaxy.yml`, and in this role's own `requirements.yml`):
+
+```shell
+ansible-galaxy collection install -r requirements.yml
+```
 
 Role Variables
 --------------

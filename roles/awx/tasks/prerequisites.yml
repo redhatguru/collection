@@ -1,0 +1,17 @@
+---
+- name: Ensure pip is installed
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+  become: true
+
+- name: Ensure the Python kubernetes client is installed
+  ansible.builtin.pip:
+    name: kubernetes
+    state: present
+    # Newer Debian/Ubuntu releases mark the system Python as "externally
+    # managed" (PEP 668) and refuse a plain system-wide pip install. Safe
+    # to pass everywhere: it's a real pip 23+ option, and a no-op when the
+    # externally-managed marker isn't present (e.g. Rocky Linux).
+    extra_args: --break-system-packages
+  become: true

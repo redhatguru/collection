@@ -1,11 +1,9 @@
 ---
-- name: Create the AWX namespace
-  ansible.builtin.command: "kubectl create namespace {{ awx_namespace }}"
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+- name: Ensure the AWX namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    api_version: v1
+    kind: Namespace
+    name: "{{ awx_namespace }}"
+    state: present
   become: true
-  register: awx_namespace_result
-  changed_when: awx_namespace_result.rc == 0
-  failed_when:
-    - awx_namespace_result.rc != 0
-    - "'AlreadyExists' not in awx_namespace_result.stderr"
