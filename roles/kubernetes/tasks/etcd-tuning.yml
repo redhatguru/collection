@@ -25,14 +25,23 @@
   become: true
   register: kubernetes_etcd_election_patch
 
-- name: Tune kube-apiserver etcd-request-timeout for disk-latency tolerance
+- name: Tune kube-apiserver etcd-healthcheck-timeout for disk-latency tolerance
   ansible.builtin.lineinfile:
     path: /etc/kubernetes/manifests/kube-apiserver.yaml
-    regexp: '^\s*- --etcd-request-timeout='
+    regexp: '^\s*- --etcd-healthcheck-timeout='
     insertafter: '^\s*- kube-apiserver$'
-    line: "    - --etcd-request-timeout={{ kubernetes_apiserver_etcd_timeout }}"
+    line: "    - --etcd-healthcheck-timeout={{ kubernetes_apiserver_etcd_timeout }}"
   become: true
-  register: kubernetes_apiserver_etcd_timeout_patch
+  register: kubernetes_apiserver_healthcheck_timeout_patch
+
+- name: Tune kube-apiserver etcd-readycheck-timeout for disk-latency tolerance
+  ansible.builtin.lineinfile:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    regexp: '^\s*- --etcd-readycheck-timeout='
+    insertafter: '^\s*- kube-apiserver$'
+    line: "    - --etcd-readycheck-timeout={{ kubernetes_apiserver_etcd_timeout }}"
+  become: true
+  register: kubernetes_apiserver_readycheck_timeout_patch
 
 - name: Give kubelet time to notice the manifest change and restart the pods
   ansible.builtin.pause:
@@ -40,7 +49,8 @@
   when: >-
     kubernetes_etcd_heartbeat_patch.changed or
     kubernetes_etcd_election_patch.changed or
-    kubernetes_apiserver_etcd_timeout_patch.changed
+    kubernetes_apiserver_healthcheck_timeout_patch.changed or
+    kubernetes_apiserver_readycheck_timeout_patch.changed
 
 - name: Wait for the control-plane endpoint to come back after the manifest change
   ansible.builtin.wait_for:
@@ -50,4 +60,5 @@
   when: >-
     kubernetes_etcd_heartbeat_patch.changed or
     kubernetes_etcd_election_patch.changed or
-    kubernetes_apiserver_etcd_timeout_patch.changed
+    kubernetes_apiserver_healthcheck_timeout_patch.changed or
+    kubernetes_apiserver_readycheck_timeout_patch.changed
