@@ -19,7 +19,8 @@ etcd:
       election-timeout: "{{ kubernetes_etcd_election_timeout }}"
 apiServer:
   extraArgs:
-    etcd-request-timeout: "{{ kubernetes_apiserver_etcd_timeout }}"
+    etcd-healthcheck-timeout: "{{ kubernetes_apiserver_etcd_timeout }}"
+    etcd-readycheck-timeout: "{{ kubernetes_apiserver_etcd_timeout }}"
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

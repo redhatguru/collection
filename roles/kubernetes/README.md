@@ -84,8 +84,10 @@ Role Variables
   routinely exceed them, causing spurious leader elections and
   kube-apiserver/etcd instability. Only lower these if the underlying disk
   is genuinely fast.
-- `kubernetes_apiserver_etcd_timeout` (default `"5s"`) — how long
-  kube-apiserver waits on a single etcd request before giving up.
+- `kubernetes_apiserver_etcd_timeout` (default `"5s"`) — kube-apiserver's
+  `--etcd-healthcheck-timeout`/`--etcd-readycheck-timeout` (both default
+  `2s` upstream); how long it waits on an etcd health/readiness check
+  before giving up.
 - `kubernetes_wait_timeout` (default `600`, seconds) — how long to wait for
   control-plane/Dashboard/ingress-nginx readiness and `kubeadm init`/`join`/
   `kubectl drain` to complete. Generous by default for the same slow-disk

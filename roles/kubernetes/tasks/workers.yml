@@ -11,7 +11,6 @@
     - name: Attempt to join this node to the cluster
       ansible.builtin.command: >-
         {{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}
-        --timeout {{ kubernetes_wait_timeout }}s
       become: true
       args:
         creates: /etc/kubernetes/kubelet.conf
@@ -36,6 +35,5 @@
     - name: Retry joining this node to the cluster
       ansible.builtin.command: >-
         {{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}
-        --timeout {{ kubernetes_wait_timeout }}s
       become: true
       changed_when: true
