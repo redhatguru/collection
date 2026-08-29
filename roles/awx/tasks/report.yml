@@ -1,17 +1,27 @@
 ---
-- name: Determine the LoadBalancer address
-  ansible.builtin.command: >-
-    kubectl get svc {{ awx_name }}-service -n {{ awx_namespace }}
-    -o jsonpath="{.status.loadBalancer.ingress[0].ip}{.status.loadBalancer.ingress[0].hostname}"
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+- name: Determine the LoadBalancer service
+  kubernetes.core.k8s_info:
+    kubeconfig: /etc/kubernetes/admin.conf
+    api_version: v1
+    kind: Service
+    name: "{{ awx_name }}-service"
+    namespace: "{{ awx_namespace }}"
   become: true
-  changed_when: false
-  failed_when: false
-  register: awx_report_lb_address
+  register: awx_report_lb_service
   retries: 12
   delay: 10
-  until: awx_report_lb_address.stdout | length > 0
+  until: >-
+    awx_report_lb_service.resources[0].status.loadBalancer.ingress
+    | default([]) | length > 0
+  when:
+    - not (awx_ingress_enabled | bool)
+    - awx_service_type == 'LoadBalancer'
+
+- name: Extract the LoadBalancer ingress entry
+  ansible.builtin.set_fact:
+    awx_report_lb_ingress: >-
+      {{ awx_report_lb_service.resources[0].status.loadBalancer.ingress
+         | default([{}]) | first }}
   when:
     - not (awx_ingress_enabled | bool)
     - awx_service_type == 'LoadBalancer'
@@ -31,11 +41,13 @@
 
 - name: Set the access URL (LoadBalancer)
   ansible.builtin.set_fact:
-    awx_report_url: "http://{{ awx_report_lb_address.stdout }}"
+    awx_report_url: >-
+      http://{{ awx_report_lb_ingress.ip | default(awx_report_lb_ingress.hostname, true) }}
   when:
     - not (awx_ingress_enabled | bool)
     - awx_service_type == 'LoadBalancer'
-    - awx_report_lb_address.stdout | default('') | length > 0
+    - awx_report_lb_ingress is defined
+    - awx_report_lb_ingress.ip is defined or awx_report_lb_ingress.hostname is defined
 
 - name: Set the access URL (fallback)
   ansible.builtin.set_fact:
@@ -44,9 +56,43 @@
       kubectl port-forward svc/{{ awx_name }}-service -n {{ awx_namespace }} 8080:80
   when: awx_report_url is not defined
 
+- name: Test whether AWX actually responds on the computed URL
+  ansible.builtin.uri:
+    url: "{{ awx_report_url }}/api/v2/ping/"
+    status_code: 200
+    validate_certs: false
+  register: awx_report_reachability
+  retries: 12
+  delay: 10
+  until: awx_report_reachability.status | default(0) == 200
+  failed_when: false
+  when: awx_report_url is match('^https?://')
+
+- name: Set the reachability status (reachable)
+  ansible.builtin.set_fact:
+    awx_report_reachable: "reachable (HTTP {{ awx_report_reachability.status }})"
+  when:
+    - awx_report_url is match('^https?://')
+    - awx_report_reachability.status | default(0) == 200
+
+- name: Set the reachability status (not reachable)
+  ansible.builtin.set_fact:
+    awx_report_reachable: >-
+      NOT reachable after retries — check DNS (for Ingress), the NodePort
+      firewall rules, or that the AWX pods are actually Running
+  when:
+    - awx_report_url is match('^https?://')
+    - awx_report_reachability.status | default(0) != 200
+
+- name: Set the reachability status (not tested)
+  ansible.builtin.set_fact:
+    awx_report_reachable: "not tested (no direct URL — see above)"
+  when: awx_report_url is not match('^https?://')
+
 - name: Print access report
   ansible.builtin.debug:
     msg:
       - "URL: {{ awx_report_url }}"
+      - "Reachable: {{ awx_report_reachable }}"
       - "Username: {{ awx_admin_user }}"
       - "Password: {{ awx_admin_password }}"

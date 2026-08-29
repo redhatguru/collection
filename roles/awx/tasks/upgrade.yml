@@ -13,20 +13,26 @@
 - name: Re-apply the AWX instance manifest (picks up awx_image_version changes)
   ansible.builtin.include_tasks: deploy.yml
 
-- name: Wait for the AWX web rollout to finish
-  ansible.builtin.command: >-
-    kubectl rollout status deployment/{{ awx_name }}-web
-    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+- name: Wait for the AWX web/task rollout to finish
+  # Mirrors "kubectl rollout status": a Deployment's "Progressing"
+  # condition carries reason "NewReplicaSetAvailable" once the newest
+  # ReplicaSet from this rollout is fully up, which is exactly what
+  # "rollout status" itself watches for (unlike "Available", which can
+  # stay True throughout a rolling update on the old ReplicaSet alone).
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ awx_name }}-{{ item }}"
+    namespace: "{{ awx_namespace }}"
+    state: present
+    wait: true
+    wait_condition:
+      type: Progressing
+      status: "True"
+      reason: NewReplicaSetAvailable
+    wait_timeout: "{{ awx_wait_timeout }}"
   become: true
-  changed_when: false
-
-- name: Wait for the AWX task rollout to finish
-  ansible.builtin.command: >-
-    kubectl rollout status deployment/{{ awx_name }}-task
-    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  become: true
-  changed_when: false
+  loop:
+    - web
+    - task
