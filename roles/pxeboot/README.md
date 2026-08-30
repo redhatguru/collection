@@ -2,9 +2,10 @@ pxeboot
 =======
 
 Sets up a PXE network boot server: TFTP via `dnsmasq`, with an optional
-proxy-DHCP service, a PXELINUX boot menu for BIOS clients, and direct UEFI
-boot support, both serving [Memtest86+](https://www.memtest.org/) as the
-first (and so far only) boot option.
+proxy-DHCP service, a PXELINUX boot menu for BIOS clients (categorized
+into "Operating Systems" and "Troubleshooting" submenus), and direct UEFI
+boot support, serving [Memtest86+](https://www.memtest.org/) under
+Troubleshooting as the first boot option.
 
 Proxy-DHCP (`pxeboot_dhcp_proxy_enabled`, default `true`) never hands out
 IP leases itself — it only answers PXE-specific DHCP requests — so it's
@@ -20,12 +21,25 @@ How clients boot
 -----------------
 
 - **BIOS clients** are handed `pxelinux.0`, which loads its own menu from
-  `pxelinux.cfg/default` on the TFTP server. That menu currently has one
-  entry: Memtest86+.
+  `pxelinux.cfg/default` on the TFTP server: a top-level choice between
+  "Operating Systems" (empty for now — a placeholder for future installer
+  entries) and "Troubleshooting" (Memtest86+ so far).
 - **UEFI x86_64 clients** (detected via DHCP option 93, client-arch 7) boot
   straight into Memtest86+'s `.efi` build — no menu yet, since it's the
   only thing to boot. A UEFI GRUB netboot menu can be added once there's
   more than one entry to choose between.
+
+Boot files and menu entries are organized under two categories on the TFTP
+server, mirroring the menu:
+
+```
+images/
+  operating-systems/          # empty for now — future OS installer entries
+  troubleshooting/
+    memtest/
+      memtest.bin              # BIOS (PXELINUX LINUX directive)
+      memtest.efi               # UEFI (direct boot, or a future GRUB menu)
+```
 
 Requirements
 ------------
@@ -90,8 +104,9 @@ final report prints this too, with the actual IP filled in):
 - **next-server** / TFTP server address: this host's IP.
 - **filename** (BIOS / default): `pxelinux.0`.
 - **filename for UEFI x86_64 clients** (DHCP option 93 = 7):
-  `images/memtest/memtest.efi`. How to make this conditional on client
-  architecture depends on your DHCP server software — e.g. a client class
+  `images/troubleshooting/memtest/memtest.efi`. How to make this
+  conditional on client architecture depends on your DHCP server
+  software — e.g. a client class
   matching option 93 in ISC dhcpd/Kea, or a vendor-class policy on
   Windows Server DHCP.
 

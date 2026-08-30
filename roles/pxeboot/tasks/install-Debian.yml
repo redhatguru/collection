@@ -18,7 +18,8 @@
   loop:
     - "{{ pxeboot_tftp_root }}"
     - "{{ pxeboot_tftp_root }}/pxelinux.cfg"
-    - "{{ pxeboot_tftp_root }}/images/memtest"
+    - "{{ pxeboot_tftp_root }}/images/operating-systems"
+    - "{{ pxeboot_tftp_root }}/images/troubleshooting/memtest"
 
 - name: Copy the PXELINUX bootloader and menu modules into the TFTP root
   ansible.builtin.copy:

@@ -29,8 +29,11 @@
         state: present
 
     - name: Fetch pxelinux.0 over real TFTP from this host's own PXE server
+      # tftp's default transfer mode is ascii, which would silently
+      # corrupt a binary bootloader file (line-ending translation) — -m
+      # binary is required.
       ansible.builtin.command:
-        argv: [tftp, "{{ pxeboot_test_ip }}", -c, get, pxelinux.0, /tmp/pxelinux.0.fetched]
+        argv: [tftp, -m, binary, "{{ pxeboot_test_ip }}", -c, get, pxelinux.0, /tmp/pxelinux.0.fetched]
       changed_when: false
 
     - name: Compare the fetched file against the one the role staged
@@ -40,7 +43,7 @@
 
     - name: Check the Memtest86+ BIOS and UEFI boot images
       ansible.builtin.stat:
-        path: "/var/lib/tftpboot/images/memtest/{{ item }}"
+        path: "/var/lib/tftpboot/images/troubleshooting/memtest/{{ item }}"
       register: pxeboot_verify_memtest
       loop:
         - memtest.bin
@@ -55,7 +58,22 @@
       loop_control:
         label: "{{ item.item }}"
 
-    - name: Check the PXELINUX menu mentions Memtest86+
+    - name: Check the operating-systems placeholder directory exists
+      ansible.builtin.stat:
+        path: /var/lib/tftpboot/images/operating-systems
+      register: pxeboot_verify_os_dir
+
+    - name: Assert the operating-systems placeholder directory exists
+      ansible.builtin.assert:
+        that:
+          - pxeboot_verify_os_dir.stat.exists
+          - pxeboot_verify_os_dir.stat.isdir
+
+    - name: Check the PXELINUX menu has the Operating Systems / Troubleshooting categories and Memtest86+
       ansible.builtin.command:
-        argv: [grep, -q, Memtest86+, /var/lib/tftpboot/pxelinux.cfg/default]
+        argv: [grep, -q, "{{ item }}", /var/lib/tftpboot/pxelinux.cfg/default]
       changed_when: false
+      loop:
+        - "MENU BEGIN operating-systems"
+        - "MENU BEGIN troubleshooting"
+        - "Memtest86+"

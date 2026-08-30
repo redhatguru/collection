@@ -26,7 +26,7 @@
 - name: Stage the Memtest86+ binary for BIOS PXE boot (PXELINUX menu entry)
   ansible.builtin.copy:
     src: "/tmp/mt86p_{{ pxeboot_memtest_version | replace('.', '') }}_x86_64"
-    dest: "{{ pxeboot_tftp_root }}/images/memtest/memtest.bin"
+    dest: "{{ pxeboot_tftp_root }}/images/troubleshooting/memtest/memtest.bin"
     mode: "0644"
     remote_src: true
   become: true
@@ -36,10 +36,11 @@
   # served with a .efi extension — confirmed via memtest.org's own PXE FAQ
   # and the project's build README (both describe one binary usable either
   # way depending on how it's named/loaded). UEFI clients boot straight
-  # into it for now, since Memtest86+ is the only menu entry so far.
+  # into it for now, since Memtest86+ is the only Troubleshooting entry
+  # so far.
   ansible.builtin.copy:
     src: "/tmp/mt86p_{{ pxeboot_memtest_version | replace('.', '') }}_x86_64"
-    dest: "{{ pxeboot_tftp_root }}/images/memtest/memtest.efi"
+    dest: "{{ pxeboot_tftp_root }}/images/troubleshooting/memtest/memtest.efi"
     mode: "0644"
     remote_src: true
   become: true

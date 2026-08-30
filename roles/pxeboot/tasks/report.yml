@@ -19,7 +19,7 @@
             'DHCP proxy: disabled — configure these on your own DHCP server:',
             '  next-server / TFTP server address: ' + ansible_default_ipv4.address,
             '  filename (BIOS / default): pxelinux.0',
-            '  filename for UEFI x86_64 clients (DHCP option 93 = 7): images/memtest/memtest.efi',
+            '  filename for UEFI x86_64 clients (DHCP option 93 = 7): images/troubleshooting/memtest/memtest.efi',
             '  (the exact syntax for a client-architecture-conditional filename' +
             ' depends on your DHCP server software — e.g. a client class in' +
             ' ISC dhcpd/Kea matching option 93, or a vendor-class policy on' +

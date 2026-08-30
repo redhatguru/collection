@@ -28,7 +28,7 @@ dhcp-range={{ pxeboot_dhcp_proxy_address }},proxy
 # BIOS PXELINUX chain below, which loads its own menu from
 # pxelinux.cfg/default.
 dhcp-match=set:efi-x86_64,option:client-arch,7
-dhcp-boot=tag:efi-x86_64,images/memtest/memtest.efi
+dhcp-boot=tag:efi-x86_64,images/troubleshooting/memtest/memtest.efi
 dhcp-boot=pxelinux.0
 
 {% endif %}
