@@ -1,0 +1,56 @@
+---
+- name: Expand kubernetes_vip_pool_start/end into extra VIPs
+  ansible.builtin.set_fact:
+    kubernetes_vips: "{{ kubernetes_vips + (kubernetes_vip_pool_yaml | from_yaml) }}"
+  vars:
+    kubernetes_vip_pool_yaml: |-
+      {% for octet in range(kubernetes_vip_pool_start.split('.')[-1] | int,
+                             kubernetes_vip_pool_end.split('.')[-1] | int + 1) %}
+      - address: "{{ kubernetes_vip_pool_start.rsplit('.', 1)[0] }}.{{ octet }}"
+        router_id: {{ kubernetes_vip_pool_router_id_start + loop.index0 }}
+      {% endfor %}
+  when:
+    - kubernetes_vip_pool_start | length > 0
+    - kubernetes_vip_pool_end | length > 0
+
+- name: Ensure every entry in kubernetes_vips has an address set
+  ansible.builtin.assert:
+    that:
+      - kubernetes_vips | length > 0
+      - kubernetes_vips | selectattr('address', 'defined') | selectattr('address', 'ne', '') | list | length == kubernetes_vips | length
+    fail_msg: >-
+      Every entry in kubernetes_vips must have a non-empty "address" when
+      kubernetes_vip_enabled is true.
+    quiet: true
+  run_once: true
+
+- name: Ensure every entry in kubernetes_vips has a unique router_id
+  ansible.builtin.assert:
+    that:
+      - kubernetes_vips | map(attribute='router_id') | unique | list | length == kubernetes_vips | length
+    fail_msg: >-
+      Every entry in kubernetes_vips must have its own router_id — two
+      VRRP instances on the same host cannot share one.
+    quiet: true
+  run_once: true
+
+- name: Install keepalived
+  ansible.builtin.package:
+    name: keepalived
+    state: present
+  become: true
+
+- name: Template the keepalived configuration
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    mode: "0644"
+  become: true
+  notify: Restart keepalived
+
+- name: Ensure keepalived is enabled and running
+  ansible.builtin.systemd:
+    name: keepalived
+    state: started
+    enabled: true
+  become: true

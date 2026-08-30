@@ -23,6 +23,69 @@
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: false
 
+- name: Template the ingress-nginx hostNetwork patch
+  ansible.builtin.template:
+    src: ingress-nginx-hostnetwork-patch.json.j2
+    dest: /etc/kubernetes/ingress-nginx-hostnetwork-patch.json
+    mode: "0644"
+  become: true
+  when: kubernetes_vip_enabled | bool
+
+- name: Run the ingress-nginx controller directly on the masters (hostNetwork)
+  # With a VIP, callers hit the masters directly on 80/443 — but a NodePort
+  # Service never binds those ports itself (only its NodePort number), so
+  # without this the VIP would still need :30880/:30943 in every URL.
+  # hostNetwork makes the controller bind 80/443 on the host directly
+  # instead: one replica per master (anti-affinity), scheduled there via a
+  # nodeSelector/toleration for the control-plane taint. Purely additive —
+  # the NodePort Service above keeps working unchanged alongside this.
+  ansible.builtin.command: >-
+    kubectl -n ingress-nginx patch deployment ingress-nginx-controller
+    --type=strategic --patch-file=/etc/kubernetes/ingress-nginx-hostnetwork-patch.json
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: kubernetes_vip_enabled | bool
+
+- name: Check the ingress-nginx controller's current args
+  ansible.builtin.command: >-
+    kubectl -n ingress-nginx get deployment ingress-nginx-controller
+    -o jsonpath={.spec.template.spec.containers[0].args}
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_ingress_current_args
+  when: kubernetes_ingress_publish_status_address | length > 0
+
+- name: Set a fixed status address for the ingress-nginx controller
+  # Without this, ingress-nginx reports whichever node its own pod happens
+  # to be running on as each Ingress's ADDRESS — fine for reachability
+  # (NodePorts are reachable via kube-proxy on every node regardless), but
+  # not a stable/predictable value if that pod gets rescheduled. Setting
+  # this pins it to a known address instead (e.g. a load balancer VIP, or
+  # a specific node your own DNS records already point to). The JSON patch
+  # appends rather than replaces, so this is skipped once the flag with
+  # its current value is already present — changing the value later
+  # appends a second --publish-status-address flag rather than updating
+  # the first (the last one wins for ingress-nginx's flag parsing, so this
+  # still takes effect, just leaves the stale flag alongside it).
+  ansible.builtin.command: >-
+    kubectl -n ingress-nginx patch deployment ingress-nginx-controller
+    --type=json -p
+    '[{"op": "add", "path": "/spec/template/spec/containers/0/args/-",
+    "value": "--publish-status-address={{ kubernetes_ingress_publish_status_address }}"}]'
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+  when:
+    - kubernetes_ingress_publish_status_address | length > 0
+    - >-
+      ('--publish-status-address=' + kubernetes_ingress_publish_status_address)
+      not in kubernetes_ingress_current_args.stdout
+
 - name: Wait for the ingress-nginx controller deployment to become available
   ansible.builtin.command: >-
     kubectl wait --for=condition=Available deployment/ingress-nginx-controller

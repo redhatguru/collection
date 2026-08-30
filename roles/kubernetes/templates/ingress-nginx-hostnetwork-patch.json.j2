@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "replicas": {{ groups['masters'] | length }},
+    "template": {
+      "spec": {
+        "hostNetwork": true,
+        "dnsPolicy": "ClusterFirstWithHostNet",
+        "nodeSelector": {
+          "node-role.kubernetes.io/control-plane": ""
+        },
+        "tolerations": [
+          {
+            "key": "node-role.kubernetes.io/control-plane",
+            "operator": "Exists",
+            "effect": "NoSchedule"
+          }
+        ],
+        "affinity": {
+          "podAntiAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": [
+              {
+                "labelSelector": {
+                  "matchLabels": {
+                    "app.kubernetes.io/name": "ingress-nginx",
+                    "app.kubernetes.io/instance": "ingress-nginx",
+                    "app.kubernetes.io/component": "controller"
+                  }
+                },
+                "topologyKey": "kubernetes.io/hostname"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
