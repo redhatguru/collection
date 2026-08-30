@@ -1,17 +1,38 @@
 ---
-- name: Ensure pip is installed
+- name: Ensure EPEL is enabled
   ansible.builtin.package:
-    name: python3-pip
+    name: epel-release
     state: present
   become: true
+  when: ansible_facts['os_family'] == 'RedHat'
 
 - name: Ensure the Python kubernetes client is installed
-  ansible.builtin.pip:
-    name: kubernetes
+  ansible.builtin.package:
+    name:
+      - python3-kubernetes
+      # EPEL 9's python3-kubernetes/python3-requests-oauthlib don't pull
+      # this in on their own (an EPEL packaging gap), even though
+      # requests-oauthlib genuinely needs it at import time. It's in
+      # AppStream (enabled by default on RHEL family), not EPEL, so this
+      # is a separate, explicit install rather than something EPEL itself
+      # is missing. On Debian family both packages already pull in their
+      # real dependencies correctly, so this is just along for the ride
+      # there.
+      - python3-oauthlib
     state: present
-    # Newer Debian/Ubuntu releases mark the system Python as "externally
-    # managed" (PEP 668) and refuse a plain system-wide pip install. Safe
-    # to pass everywhere: it's a real pip 23+ option, and a no-op when the
-    # externally-managed marker isn't present (e.g. Rocky Linux).
-    extra_args: --break-system-packages
+    # Only affects apt (dnf/yum ignore it): without a fresh index, a host
+    # that never ran "apt update" before this role (e.g. awx applied on
+    # its own, not right after the kubernetes role) fails with "Unable to
+    # locate package" instead of installing it.
+    update_cache: true
+  become: true
+
+- name: Ensure git is installed
+  # operator.yml's kustomization references a remote GitHub base
+  # (github.com/ansible/awx-operator/config/default?ref=...), which
+  # "kubectl apply -k" fetches via git — it fails outright without it.
+  ansible.builtin.package:
+    name: git
+    state: present
+    update_cache: true
   become: true

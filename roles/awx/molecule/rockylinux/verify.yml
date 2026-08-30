@@ -1,0 +1,54 @@
+---
+- name: Verify
+  hosts: single
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Check node is Ready
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - nodes
+          - -o
+          - jsonpath={.items[0].status.conditions[?(@.type=="Ready")].status}
+      register: awx_verify_node_ready
+      changed_when: false
+
+    - name: Assert node is Ready
+      ansible.builtin.assert:
+        that: awx_verify_node_ready.stdout == "True"
+
+    - name: Check AWX deployments are available
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - deployment
+          - "{{ (awx_name | default('awx')) }}-{{ item }}"
+          - -n
+          - "{{ awx_namespace | default('awx') }}"
+          - -o
+          - jsonpath={.status.conditions[?(@.type=="Available")].status}
+      register: awx_verify_deployment
+      changed_when: false
+      loop:
+        - web
+        - task
+
+    - name: Assert AWX deployments are available
+      ansible.builtin.assert:
+        that: item.stdout == "True"
+      loop: "{{ awx_verify_deployment.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Check the AWX web UI responds
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ awx_nodeport_port | default(30080) }}/api/v2/ping/"
+        status_code: 200
+      register: awx_verify_ping
+      retries: 12
+      delay: 10
+      until: awx_verify_ping.status == 200
