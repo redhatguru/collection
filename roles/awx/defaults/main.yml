@@ -36,6 +36,13 @@ awx_ingress_enabled: false
 awx_ingress_host: ""
 awx_ingress_class_name: "nginx"
 awx_ingress_tls_secret: ""
+# Purely informational: which VIP (e.g. one from the kubernetes role's
+# kubernetes_vips/kubernetes_vip_pool_*) you intend awx_ingress_host's DNS
+# record to point at. Not required — the ingress-nginx controller answers
+# on every VIP a master holds regardless of which one DNS actually uses —
+# but setting it makes the report below print the exact DNS record needed
+# instead of you having to work it out yourself.
+awx_ingress_address: ""
 
 # AWX admin (superuser) account, created on first boot.
 awx_admin_user: "admin"

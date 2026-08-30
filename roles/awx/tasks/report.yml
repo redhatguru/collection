@@ -91,8 +91,17 @@
 
 - name: Print access report
   ansible.builtin.debug:
-    msg:
-      - "URL: {{ awx_report_url }}"
-      - "Reachable: {{ awx_report_reachable }}"
-      - "Username: {{ awx_admin_user }}"
-      - "Password: {{ awx_admin_password }}"
+    msg: >-
+      {{
+        ['URL: ' + awx_report_url] +
+        (
+          ['DNS record needed: ' + awx_ingress_host + ' -> ' + awx_ingress_address]
+          if (awx_ingress_enabled | bool and awx_ingress_address | length > 0)
+          else []
+        ) +
+        [
+          'Reachable: ' + awx_report_reachable,
+          'Username: ' + awx_admin_user,
+          'Password: ' + awx_admin_password
+        ]
+      }}
