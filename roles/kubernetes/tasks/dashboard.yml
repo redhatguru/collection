@@ -1,4 +1,14 @@
 ---
+- name: Ensure kubernetes_dashboard_ingress_host is set when the Ingress is enabled
+  ansible.builtin.assert:
+    that:
+      - kubernetes_dashboard_ingress_host | length > 0
+    fail_msg: >-
+      kubernetes_dashboard_ingress_host must be set to a hostname when
+      kubernetes_dashboard_ingress_enabled is true.
+    quiet: true
+  when: kubernetes_dashboard_ingress_enabled | bool
+
 - name: Install the Kubernetes Dashboard
   ansible.builtin.command: >-
     kubectl apply -f
@@ -38,9 +48,165 @@
 - name: Expose the dashboard via a NodePort
   ansible.builtin.command: >-
     kubectl -n kubernetes-dashboard patch svc kubernetes-dashboard -p
-    '{"spec": {"type": "NodePort", "ports": [{"port": 443, "targetPort": 8443,
-    "nodePort": {{ kubernetes_dashboard_node_port }}}]}}'
+    '{"spec": {"type": "NodePort", "ports": {{ kubernetes_dashboard_svc_ports | to_json }}}}'
+  vars:
+    kubernetes_dashboard_svc_ports: >-
+      {{
+        [{'name': 'https', 'port': 443, 'targetPort': 8443, 'nodePort': kubernetes_dashboard_node_port}] +
+        ([{'name': 'http', 'port': 80, 'targetPort': kubernetes_dashboard_insecure_http_port}]
+          if kubernetes_dashboard_insecure_http_enabled | bool else [])
+      }}
   become: true
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   changed_when: false
+
+- name: Enable insecure HTTP login on the Dashboard
+  # See kubernetes_dashboard_insecure_http_enabled in defaults/main.yml for
+  # why this is needed at all. Replaces the whole args list (rather than
+  # appending) specifically to drop --auto-generate-certificates, which
+  # the recommended.yaml manifest sets by default and which disables the
+  # insecure listener outright when present, regardless of
+  # --enable-insecure-login/--insecure-port — the container would only
+  # ever serve HTTPS, leaving nothing on the insecure port for
+  # ingress-nginx to reach (502 Bad Gateway). --insecure-port is set
+  # explicitly rather than relying on the binary's own default, which
+  # isn't consistently documented across sources.
+  ansible.builtin.command: >-
+    kubectl -n kubernetes-dashboard patch deployment kubernetes-dashboard
+    --type=json -p
+    '[{"op": "replace", "path": "/spec/template/spec/containers/0/args", "value": [
+    "--namespace=kubernetes-dashboard", "--enable-insecure-login",
+    "--insecure-bind-address=0.0.0.0", "--insecure-port={{ kubernetes_dashboard_insecure_http_port }}"]}]'
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: kubernetes_dashboard_insecure_http_enabled | bool
+
+- name: Fix the Dashboard's liveness probe for the insecure HTTP listener
+  # The stock manifest's livenessProbe checks HTTPS on 8443 — which no
+  # longer exists once --auto-generate-certificates is dropped above (the
+  # container only listens on the insecure HTTP port now), so kubelet
+  # kept killing the container in a CrashLoopBackOff even though it was
+  # actually healthy — "connect: connection refused" on 8443 in the pod's
+  # events, despite "Serving insecurely on HTTP port" in its own logs.
+  ansible.builtin.command: >-
+    kubectl -n kubernetes-dashboard patch deployment kubernetes-dashboard
+    --type=json -p
+    '[{"op": "replace", "path": "/spec/template/spec/containers/0/livenessProbe/httpGet", "value": {
+    "scheme": "HTTP", "path": "/", "port": {{ kubernetes_dashboard_insecure_http_port }}}}]'
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: kubernetes_dashboard_insecure_http_enabled | bool
+
+- name: Wait for the dashboard deployment to become available again
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Available deployment/kubernetes-dashboard
+    -n kubernetes-dashboard --timeout={{ kubernetes_wait_timeout }}s
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: kubernetes_dashboard_insecure_http_enabled | bool
+
+- name: Install htpasswd for the Dashboard basic-auth secret
+  ansible.builtin.package:
+    name: "{{ 'httpd-tools' if ansible_facts['os_family'] == 'RedHat' else 'apache2-utils' }}"
+    state: present
+  become: true
+  when:
+    - kubernetes_dashboard_ingress_enabled | bool
+    - kubernetes_dashboard_basic_auth_enabled | bool
+
+- name: Generate the htpasswd entry for the Dashboard
+  ansible.builtin.command: >-
+    htpasswd -nbB {{ kubernetes_dashboard_basic_auth_username }}
+    {{ kubernetes_dashboard_basic_auth_password }}
+  become: true
+  changed_when: false
+  no_log: true
+  register: kubernetes_dashboard_htpasswd
+  when:
+    - kubernetes_dashboard_ingress_enabled | bool
+    - kubernetes_dashboard_basic_auth_enabled | bool
+
+- name: Apply the Dashboard basic-auth secret
+  ansible.builtin.shell: >-
+    set -o pipefail && kubectl -n kubernetes-dashboard create secret generic
+    kubernetes-dashboard-basic-auth
+    --from-literal=auth='{{ kubernetes_dashboard_htpasswd.stdout }}'
+    --dry-run=client -o yaml | kubectl apply -f -
+  args:
+    executable: /bin/bash
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  changed_when: false
+  no_log: true
+  when:
+    - kubernetes_dashboard_ingress_enabled | bool
+    - kubernetes_dashboard_basic_auth_enabled | bool
+
+- name: Template the dashboard Ingress
+  ansible.builtin.template:
+    src: dashboard-ingress.yaml.j2
+    dest: /etc/kubernetes/dashboard-ingress.yaml
+    mode: "0644"
+  become: true
+  when: kubernetes_dashboard_ingress_enabled | bool
+
+- name: Check the dashboard Ingress's currently reported address
+  ansible.builtin.command: >-
+    kubectl -n kubernetes-dashboard get ingress kubernetes-dashboard
+    -o jsonpath={.status.loadBalancer.ingress[0].ip}
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  failed_when: false
+  register: kubernetes_dashboard_ingress_current_address
+  when:
+    - kubernetes_dashboard_ingress_enabled | bool
+    - kubernetes_ingress_publish_status_address | length > 0
+
+- name: Recreate the dashboard Ingress if its reported address is stale
+  # ingress-nginx only refreshes an Ingress's status on a create/update
+  # event for that specific object. If kubernetes_ingress_publish_status
+  # _address changes on the controller while this Ingress itself stays
+  # unchanged, "kubectl apply" below is a no-op and the stale address
+  # lingers forever. Deleting it here forces the apply below to recreate
+  # it, which does trigger a fresh sync.
+  ansible.builtin.command: kubectl -n kubernetes-dashboard delete ingress kubernetes-dashboard
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+  when:
+    - kubernetes_dashboard_ingress_enabled | bool
+    - kubernetes_ingress_publish_status_address | length > 0
+    - kubernetes_dashboard_ingress_current_address.stdout | default('') | length > 0
+    - kubernetes_dashboard_ingress_current_address.stdout != kubernetes_ingress_publish_status_address
+
+- name: Apply the dashboard Ingress
+  # Retried, generously: even after the ingress-nginx controller Deployment
+  # reports Available, its validating admission webhook can stay
+  # unreachable for a while longer — the controller pod has to wait out a
+  # webhook-cert Secret that isn't created until the admission Job
+  # finishes (repeated FailedMount until then), and on top of that the pod
+  # IP still needs to propagate through the CNI's cross-node routing
+  # before other nodes (e.g. the master calling this webhook) can reach
+  # it. On a slow/loaded cluster both can comfortably take minutes, so
+  # this reuses kubernetes_wait_timeout instead of a short fixed budget.
+  ansible.builtin.command: kubectl apply -f /etc/kubernetes/dashboard-ingress.yaml
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_dashboard_ingress_apply
+  retries: "{{ (kubernetes_wait_timeout / 10) | int }}"
+  delay: 10
+  until: kubernetes_dashboard_ingress_apply.rc == 0
+  when: kubernetes_dashboard_ingress_enabled | bool

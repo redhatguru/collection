@@ -1,4 +1,7 @@
 ---
+# RedHat-family hosts have no rules here: firewalld is disabled outright
+# on them (see install-RedHat.yml) because it conflicts with Calico, so
+# there's no firewall to open these ports on in the first place.
 - name: Allow the API server from the public internet (ufw)
   community.general.ufw:
     rule: allow
@@ -6,15 +9,6 @@
     proto: tcp
   become: true
   when: ansible_facts['os_family'] == 'Debian'
-
-- name: Allow the API server from the public internet (firewalld)
-  ansible.posix.firewalld:
-    port: "6443/tcp"
-    permanent: true
-    immediate: true
-    state: enabled
-  become: true
-  when: ansible_facts['os_family'] == 'RedHat'
 
 - name: Allow the dashboard NodePort from the public internet (ufw)
   community.general.ufw:
@@ -24,17 +18,6 @@
   become: true
   when:
     - ansible_facts['os_family'] == 'Debian'
-    - kubernetes_dashboard_enabled | bool
-
-- name: Allow the dashboard NodePort from the public internet (firewalld)
-  ansible.posix.firewalld:
-    port: "{{ kubernetes_dashboard_node_port }}/tcp"
-    permanent: true
-    immediate: true
-    state: enabled
-  become: true
-  when:
-    - ansible_facts['os_family'] == 'RedHat'
     - kubernetes_dashboard_enabled | bool
 
 - name: Allow the ingress-nginx NodePorts from the public internet (ufw)
@@ -48,18 +31,4 @@
     - "{{ kubernetes_ingress_https_node_port }}"
   when:
     - ansible_facts['os_family'] == 'Debian'
-    - kubernetes_ingress_enabled | bool
-
-- name: Allow the ingress-nginx NodePorts from the public internet (firewalld)
-  ansible.posix.firewalld:
-    port: "{{ item }}/tcp"
-    permanent: true
-    immediate: true
-    state: enabled
-  become: true
-  loop:
-    - "{{ kubernetes_ingress_http_node_port }}"
-    - "{{ kubernetes_ingress_https_node_port }}"
-  when:
-    - ansible_facts['os_family'] == 'RedHat'
     - kubernetes_ingress_enabled | bool

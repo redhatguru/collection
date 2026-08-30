@@ -58,9 +58,31 @@
           [
             '',
             'Dashboard: https://' + kubernetes_node_ip + ':' +
-              (kubernetes_dashboard_node_port | string) + '/',
-            'Token: ' + kubernetes_report_dashboard_token.stdout
-          ] if kubernetes_dashboard_enabled | bool
+              (kubernetes_dashboard_node_port | string) + '/'
+          ] +
+          (
+            ['Dashboard (Ingress): https://' + kubernetes_dashboard_ingress_host + '/']
+            if kubernetes_dashboard_ingress_enabled | bool else []
+          ) +
+          (
+            [
+              'DNS record needed: ' + kubernetes_dashboard_ingress_host +
+                ' -> ' + kubernetes_ingress_publish_status_address
+            ]
+            if (kubernetes_dashboard_ingress_enabled | bool
+                and kubernetes_ingress_publish_status_address | length > 0)
+            else []
+          ) +
+          (
+            [
+              'Ingress login — username: ' + kubernetes_dashboard_basic_auth_username,
+              'Ingress login — password: ' + kubernetes_dashboard_basic_auth_password
+            ]
+            if (kubernetes_dashboard_ingress_enabled | bool and kubernetes_dashboard_basic_auth_enabled | bool)
+            else []
+          ) +
+          ['Token: ' + kubernetes_report_dashboard_token.stdout]
+          if kubernetes_dashboard_enabled | bool
           else ['', 'Dashboard: disabled (kubernetes_dashboard_enabled: false)']
         )
       }}
