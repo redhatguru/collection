@@ -49,7 +49,9 @@
 
 - name: Open firewall port for PostgreSQL
   ansible.posix.firewalld:
-    service: postgresql
+    rich_rule: >-
+      rule family='ipv4' source address='{{ postgresql_allow_subnet }}'
+      port protocol='tcp' port='{{ postgresql_port }}' accept
     permanent: true
     state: enabled
     immediate: true

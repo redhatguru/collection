@@ -7,10 +7,32 @@ postgresql_conf_dir: >-
      else '/etc/postgresql/' + postgresql_version + '/main' }}
 postgresql_hba: "{{ postgresql_conf_dir }}/pg_hba.conf"
 postgresql_conf: "{{ postgresql_conf_dir }}/postgresql.conf"
+# Directory holding the pg_dump/psql/etc. client binaries, used by the
+# backup task. PGDG packages don't put these on PATH on RedHat family
+# hosts, so the full path is needed there.
+postgresql_bin_dir: >-
+  {{ '/usr/pgsql-' + postgresql_version + '/bin'
+     if ansible_facts['os_family'] == 'RedHat'
+     else '/usr/lib/postgresql/' + postgresql_version + '/bin' }}
 postgresql_port: "5432"
 postgresql_sslmode: "Disable"
 postgresql_root_password: "dbrootpass"
-postgresql_user: "dbuser"
-postgresql_user_password: "dbuser"
+# Application database users to create, each granted full privileges on
+# postgresql_database_name. Add more entries to create several users on
+# the same database.
+postgresql_users:
+  - name: dbuser
+    password: dbuser
 postgresql_database_name: "awx"
 postgresql_allow_subnet: "0.0.0.0/0"
+
+# Automatic backups (pg_dump, gzipped) of postgresql_database_name, via a
+# cron job owned by the postgres user.
+postgresql_backup_dir: "/backup"
+# Cron schedule fields for the backup job; the defaults run it weekly,
+# Sunday at 02:00.
+postgresql_backup_minute: "0"
+postgresql_backup_hour: "2"
+postgresql_backup_day: "*"
+postgresql_backup_month: "*"
+postgresql_backup_weekday: "0"

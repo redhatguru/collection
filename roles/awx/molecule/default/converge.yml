@@ -14,8 +14,9 @@
   become: true
   vars:
     postgresql_database_name: awx
-    postgresql_user: dbuser
-    postgresql_user_password: dbuser
+    postgresql_users:
+      - name: dbuser
+        password: dbuser
     postgresql_allow_subnet: "10.10.14.0/24"
   tasks:
     - name: Include postgresql role

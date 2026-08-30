@@ -112,9 +112,10 @@ Role Variables
 - `awx_postgres_port` (default `5432`)
 - `awx_postgres_database` (default `"awx"`) — matches `postgresql_database_name`'s
   own default, so the two roles line up out of the box.
-- `awx_postgres_user` (default `"dbuser"`) — matches `postgresql_user`'s own default.
-- `awx_postgres_password` (default `"dbuser"`) — matches `postgresql_user_password`'s
-  own default.
+- `awx_postgres_user` (default `"dbuser"`) — matches the first entry of
+  `postgresql_users`' own default.
+- `awx_postgres_password` (default `"dbuser"`) — matches that same entry's
+  password.
 - `awx_postgres_sslmode` (default `"prefer"`)
 - `awx_wait_timeout` (default `900`) — seconds to wait for the operator and
   AWX itself to become ready. AWX's images are large and the operator does
@@ -130,8 +131,9 @@ Example Playbook
   become: true
   vars:
     postgresql_database_name: awx
-    postgresql_user: awx
-    postgresql_user_password: "S3cretPassword"
+    postgresql_users:
+      - name: awx
+        password: "S3cretPassword"
     postgresql_allow_subnet: "10.0.0.0/24"
   tasks:
     - name: PostgreSQL

@@ -4,11 +4,22 @@
   become: true
   vars:
     postgresql_version: "17"
-    postgresql_user: "awx"
-    postgresql_user_password: "ChangeMe123!"
+    # Database created, and the users granted full privileges on it. Add
+    # more entries to create several users on the same database.
     postgresql_database_name: "awx"
+    postgresql_users:
+      - name: "awx"
+        password: "ChangeMe123!"
+      - name: "awx-readonly"
+        password: "ChangeMe456!"
+    # Password set for the postgres superuser during hardening.
     postgresql_root_password: "ChangeMeToo123!"
     postgresql_allow_subnet: "10.0.0.0/24"
+    # Automatic pg_dump backups: where they land, and on what schedule
+    # (cron fields; the defaults already run weekly, Sunday at 02:00).
+    postgresql_backup_dir: "/backup"
+    postgresql_backup_hour: "3"
+    postgresql_backup_weekday: "0"
 
   tasks:
     - name: PostgreSQL
@@ -19,3 +30,5 @@
         - createdb
         - createusr
         - hardening
+        - backup
+        - report

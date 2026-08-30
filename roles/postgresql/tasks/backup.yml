@@ -1,0 +1,29 @@
+---
+- name: Ensure the backup directory exists
+  ansible.builtin.file:
+    path: "{{ postgresql_backup_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+  become: true
+
+- name: Schedule a periodic pg_dump backup
+  ansible.builtin.cron:
+    name: "PostgreSQL backup of {{ postgresql_database_name }}"
+    # Written to /etc/cron.d instead of postgres's own crontab: the
+    # postgres service account has a login shell that isn't allowed to
+    # run crontab itself (PAM/cron.allow), but cron.d entries are read
+    # directly by the daemon regardless of the target user's login rights.
+    cron_file: "postgresql-backup-{{ postgresql_database_name }}"
+    user: postgres
+    minute: "{{ postgresql_backup_minute }}"
+    hour: "{{ postgresql_backup_hour }}"
+    day: "{{ postgresql_backup_day }}"
+    month: "{{ postgresql_backup_month }}"
+    weekday: "{{ postgresql_backup_weekday }}"
+    job: >-
+      {{ postgresql_bin_dir }}/pg_dump {{ postgresql_database_name }} | gzip
+      > {{ postgresql_backup_dir }}/{{ postgresql_database_name }}_$(date +\%Y\%m\%d\%H\%M\%S).sql.gz
+  become: true
+...
