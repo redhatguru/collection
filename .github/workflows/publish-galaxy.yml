@@ -1,0 +1,39 @@
+---
+name: publish-galaxy
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install ansible-core
+        run: pip install ansible-core
+
+      - name: Verify the tag matches galaxy.yml's version
+        if: github.event_name == 'push'
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          galaxy_version="$(sed -n 's/^version: *//p' galaxy.yml | tr -d '"')"
+          if [ "$tag_version" != "$galaxy_version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match galaxy.yml version $galaxy_version" >&2
+            exit 1
+          fi
+
+      - name: Build the collection
+        run: ansible-galaxy collection build --output-path build
+
+      - name: Publish to Ansible Galaxy
+        run: ansible-galaxy collection publish build/*.tar.gz --api-key "${{ secrets.GALAXY_API_KEY }}"

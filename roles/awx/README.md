@@ -81,6 +81,13 @@ Role Variables
 - `awx_ingress_tls_secret` (default `""`) — name of a TLS secret already
   present in `awx_namespace` to terminate HTTPS with. Left empty, the
   Ingress is HTTP-only.
+- `awx_ingress_address` (default `""`, optional) — purely informational:
+  which VIP (e.g. one from the `kubernetes` role's `kubernetes_vips`/
+  `kubernetes_vip_pool_*`) you intend `awx_ingress_host`'s DNS record to
+  point at. Not required for AWX to actually work — the ingress-nginx
+  controller answers on every VIP a master holds regardless of which one
+  DNS uses — but setting it makes the report print the exact DNS record
+  needed instead of you having to work it out yourself.
 - `awx_admin_user` (default `"admin"`) — AWX superuser account created on
   first boot.
 - `awx_admin_password` (default `"ChangeMe123!"`) — password for
@@ -193,12 +200,17 @@ Two independent things can be upgraded:
 Testing
 -------
 
-This role has a Molecule scenario that brings up two VirtualBox VMs (via
-Vagrant), on Ubuntu 26.04, closely mirroring a real deployment:
+This role has two Molecule scenarios, each bringing up two VirtualBox VMs
+(via Vagrant) closely mirroring a real deployment:
 1. A single-node Kubernetes cluster (`kubernetes` role, `single` group).
 2. A PostgreSQL server for AWX (`postgresql` role).
 3. AWX itself, deployed from the Kubernetes node against that PostgreSQL
    server.
+
+`default` runs this on Ubuntu 26.04; `rockylinux` runs the exact same
+converge/verify on Rocky Linux 9, to exercise both of this role's
+supported `ansible_facts['os_family']` branches (Debian/RedHat) — e.g.
+`prerequisites.yml`'s package names and EPEL setup.
 
 ```shell
 pip install molecule "molecule-plugins[vagrant]" python-vagrant
@@ -208,7 +220,8 @@ ansible-galaxy collection install -r requirements.yml
 # with newer molecule releases.
 export ANSIBLE_LIBRARY="$(python3 -c 'import molecule_plugins, os; print(os.path.join(os.path.dirname(molecule_plugins.__file__), "vagrant", "modules"))')"
 
-molecule test
+molecule test               # Ubuntu (default scenario)
+molecule test -s rockylinux # Rocky Linux
 ```
 
 Requires Vagrant and VirtualBox installed locally. AWX's images are large
