@@ -34,9 +34,11 @@ Requirements
   manifests are fetched from GitHub, and AWX/operator container images are
   pulled from Quay/Docker Hub).
 - The role installs the Python `kubernetes` client on that host itself
-  (`pip`, via the `prerequisites` tag) — it's needed by `kubernetes.core`'s
-  modules, which this role uses for everything except installing the AWX
-  Operator's kustomize manifests (`kubectl apply -k`, which
+  (the `python3-kubernetes` distro package — EPEL on RedHat family, which
+  this also enables; `universe` on Debian family — via the
+  `prerequisites` tag) — it's needed by `kubernetes.core`'s modules, which
+  this role uses for everything except installing the AWX Operator's
+  kustomize manifests (`kubectl apply -k`, which
   `kubernetes.core.k8s` has no equivalent for).
 
 ### Collections
