@@ -19,13 +19,69 @@ kubernetes_calico_version: "3.28.0"
 
 # Endpoint (host/IP) the control plane is reachable on. Only relevant for
 # the "masters" group; defaults to the first master's address so a cluster
-# works out of the box without a separate load balancer in front of it.
+# works out of the box without a separate load balancer in front of it. If
+# you enable kubernetes_vip_enabled below, consider pointing this at
+# kubernetes_vip_address instead, for genuine apiserver HA.
 kubernetes_control_plane_endpoint: >-
   {{ hostvars[groups['masters'][0]]['kubernetes_node_ip']
      if (groups['masters'] | default([])) | length > 0 else '' }}
 
+# Floating VIP(s) across the masters (keepalived/VRRP), so other things
+# (external DNS, kubernetes_ingress_publish_status_address, or
+# kubernetes_control_plane_endpoint above) can point at a stable address
+# that keeps working if a master goes down — unlike a plain node IP, these
+# actually move to a healthy master, tracked via a local TCP check against
+# the API server. Only ever applied to the masters group. One entry is
+# enough for the API server/Dashboard; add more to give other things
+# (e.g. AWX's Ingress) their own dedicated address — since ingress-nginx
+# runs with hostNetwork on every master (see kubernetes_vip_enabled's use
+# in ingress.yml), it already answers on every VIP a master holds, so a
+# second entry here is all a second Ingress hostname needs.
+kubernetes_vip_enabled: false
+# Explicit VIPs. Each needs its own router_id (VRRP virtual_router_id;
+# unique per entry, unique among any other VRRP instances on the same L2
+# segment (0-255), identical for that entry across every master).
+kubernetes_vips: []
+# Alternative (or addition) to listing kubernetes_vips by hand: a whole
+# range of addresses (last octet only, e.g. "10.11.0.50" to "10.11.0.60")
+# to reserve as a pool of VIPs up front, so adding a new Ingress hostname
+# later just means picking an already-reserved, already-working address
+# instead of a role change. Appended to kubernetes_vips above; router_ids
+# are assigned sequentially starting at kubernetes_vip_pool_router_id_start.
+kubernetes_vip_pool_start: ""
+kubernetes_vip_pool_end: ""
+kubernetes_vip_pool_router_id_start: 60
+# Network interface VRRP advertisements are sent on; must be the interface
+# carrying kubernetes_node_ip. Auto-detected per host by default.
+kubernetes_vip_interface: "{{ ansible_default_ipv4.interface }}"
+# VRRP simple authentication password, shared by every VIP above.
+# keepalived truncates this to 8 characters — longer values are silently
+# cut, not rejected. Change it.
+kubernetes_vip_auth_pass: "ChangeMe"
+
 # Pin kubelet/kubeadm/kubectl so a generic OS package update can't bump them.
 kubernetes_hold_packages: true
+
+# etcd is very sensitive to slow disk fsync latency: on underpowered/shared
+# storage, requests routinely take well over etcd's 100ms-heartbeat/1000ms
+# -election-timeout defaults, causing spurious leader elections and
+# kube-apiserver/etcd instability (visible as high restart counts on the
+# control-plane static pods, and things like the AWX Operator losing its
+# leader-election lease). These raise etcd's tolerance for that latency;
+# only lower them if you know the underlying disk is genuinely fast.
+# Applied at kubeadm init time via ClusterConfiguration, so they take
+# effect on every control-plane node (join inherits the stored config).
+kubernetes_etcd_heartbeat_interval: "250"
+kubernetes_etcd_election_timeout: "2500"
+# How long kube-apiserver waits on a single etcd request before giving up.
+kubernetes_apiserver_etcd_timeout: "5s"
+
+# Seconds to wait for control-plane/Dashboard/ingress-nginx readiness
+# (control-plane endpoint reachability, "kubectl wait --for=condition
+# =Available", and "kubectl drain" during an upgrade). Generous by default
+# so slow disk I/O (see kubernetes_etcd_heartbeat_interval above) doesn't
+# turn into a hard failure on its own.
+kubernetes_wait_timeout: 600
 
 # Target minor version for a rolling upgrade (tag "upgrade", opt-in only —
 # see tasks/upgrade.yml). Defaults to kubernetes_version so an accidental
@@ -48,6 +104,35 @@ kubernetes_dashboard_node_port: 30443
 # kubernetes_public_access_enabled below); re-run
 # `kubectl -n kubernetes-dashboard create token dashboard-user` for a new one.
 kubernetes_dashboard_token_duration: "24h"
+# Expose the Dashboard through an Ingress too (on top of its NodePort),
+# via the ingress-nginx controller this role installs
+# (kubernetes_ingress_enabled). kubernetes_dashboard_ingress_host must be
+# set when this is true. kubernetes_dashboard_ingress_tls_secret, if set,
+# names a TLS secret already present in the kubernetes-dashboard namespace
+# to terminate HTTPS with; left empty, the Ingress is HTTP-only (the
+# Dashboard's own backend is still reached over HTTPS either way).
+kubernetes_dashboard_ingress_enabled: false
+kubernetes_dashboard_ingress_host: ""
+kubernetes_dashboard_ingress_class_name: "nginx"
+kubernetes_dashboard_ingress_tls_secret: ""
+# The Dashboard itself has no username/password login (only bearer
+# tokens), so this adds one in front of it via ingress-nginx HTTP Basic
+# Auth — only takes effect while kubernetes_dashboard_ingress_enabled is
+# also true, since it's enforced by the Ingress, not the Dashboard.
+kubernetes_dashboard_basic_auth_enabled: true
+kubernetes_dashboard_basic_auth_username: "admin"
+kubernetes_dashboard_basic_auth_password: "ChangeMe123!"
+# The Dashboard's own frontend refuses to show the sign-in form when
+# accessed over plain HTTP from anywhere but localhost ("Insecure access
+# detected"), regardless of any Ingress/ssl-redirect setting — that check
+# is baked into the Dashboard itself. This runs it with an explicit
+# insecure HTTP listener and --enable-insecure-login to lift that block,
+# and points the Ingress at that listener instead of the HTTPS one.
+# Security trade-off: sign-in credentials then travel in plain text
+# between the browser and ingress-nginx. Only takes effect while
+# kubernetes_dashboard_ingress_enabled is also true.
+kubernetes_dashboard_insecure_http_enabled: false
+kubernetes_dashboard_insecure_http_port: 8080
 
 # Hardening. kubernetes_hardening_enabled is the master switch; the two
 # sub-toggles below only take effect while it's true.
@@ -63,3 +148,21 @@ kubernetes_harden_network_policy: true
 # the single node). Cluster-internal traffic between nodes is always
 # allowed regardless of this setting.
 kubernetes_public_access_enabled: true
+
+# ingress-nginx: the only Ingress controller this role installs. Lets
+# other roles (e.g. awx) expose services on a real hostname instead of a
+# raw NodePort.
+kubernetes_ingress_enabled: true
+kubernetes_ingress_version: "1.11.3"
+# Fixed NodePorts the ingress-nginx controller's Service is patched to use
+# for HTTP/HTTPS, so they're predictable enough to open on the firewall
+# (see kubernetes_public_access_enabled) and to point DNS records at.
+kubernetes_ingress_http_node_port: 30880
+kubernetes_ingress_https_node_port: 30943
+# Pins the ADDRESS shown by "kubectl get ingress" (and status.loadBalancer
+# .ingress[].ip on every Ingress) to a fixed value, instead of whichever
+# node the ingress-nginx pod happens to be running on. Set this to an IP
+# or hostname your own DNS records already point to (e.g. a load balancer
+# VIP, or a specific node). Empty (the default) leaves ingress-nginx's own
+# auto-detection in place.
+kubernetes_ingress_publish_status_address: ""

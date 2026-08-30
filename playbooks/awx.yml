@@ -1,43 +1,39 @@
 ---
-# Example playbook for the awx role. Run this against whichever host has
-# the kubernetes role already applied (a "single" node, or one of the
-# "masters" — kubectl and /etc/kubernetes/admin.conf need to already be
-# present there), against an already-reachable PostgreSQL server deployed
-# with the postgresql role (see playbooks/postgresql.yml and
-# playbooks/kubernetes.yml).
-#
-# Inventory (reusing the groups from the other example playbooks):
-#   [single]
-#   k8s-single-01
-#
-#   [postgresql]
-#   postgres-server-01
 - name: Deploy AWX
   hosts: single:masters
   become: true
   vars:
-    # Kubernetes namespace the AWX Operator and the AWX instance are both
-    # deployed into.
     awx_namespace: "awx"
-    # AWX Operator release to install.
     awx_operator_version: "2.19.1"
-    # Name of the AWX custom resource, and the prefix for the resources
-    # the operator creates for it.
+    awx_operator_kube_rbac_proxy_image: "quay.io/brancz/kube-rbac-proxy:v0.15.0"
     awx_name: "awx"
-    # How the AWX web service is exposed: ClusterIP, NodePort or LoadBalancer.
-    awx_service_type: "NodePort"
-    awx_nodeport_port: 30080
-    # AWX superuser account created on first boot.
+    awx_service_type: "ClusterIP"
+    awx_ingress_enabled: true
+    awx_ingress_host: "awx.devlab.local"
+    awx_ingress_class_name: "nginx"
+    awx_ingress_tls_secret: ""
     awx_admin_user: "admin"
     awx_admin_password: "AnotherChangeMe123!"
     awx_replicas: 1
-    # External PostgreSQL database AWX connects to — the host running the
-    # postgresql role, and the same user/database/password configured in
-    # playbooks/postgresql.yml.
-    awx_postgres_host: "{{ hostvars[groups['postgresql'][0]]['ansible_default_ipv4']['address'] }}"
+    awx_task_cpu_request: "100m"
+    awx_task_mem_request: "128Mi"
+    awx_task_cpu_limit: "2000m"
+    awx_task_mem_limit: "4Gi"
+    awx_web_cpu_request: "100m"
+    awx_web_mem_request: "128Mi"
+    awx_web_cpu_limit: "1000m"
+    awx_web_mem_limit: "4Gi"
+    awx_ee_cpu_request: "100m"
+    awx_ee_mem_request: "128Mi"
+    awx_ee_cpu_limit: "1000m"
+    awx_ee_mem_limit: "4Gi"
+    awx_postgres_host: "{{ groups['postgresql'][0] }}"
+    awx_postgres_port: 5432
     awx_postgres_database: "awx"
     awx_postgres_user: "awx"
     awx_postgres_password: "ChangeMe123!"
+    awx_postgres_sslmode: "prefer"
+    awx_wait_timeout: 900
 
   tasks:
     - name: AWX

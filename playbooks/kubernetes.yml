@@ -7,9 +7,22 @@
     kubernetes_pod_network_cidr: "192.168.10.0/16"
     kubernetes_dashboard_enabled: true
     kubernetes_dashboard_admin_user: true
+    kubernetes_dashboard_ingress_enabled: true
+    kubernetes_dashboard_ingress_host: "k8s-dashboard.domain.lan"
+    kubernetes_dashboard_basic_auth_username: "admin"
+    kubernetes_dashboard_basic_auth_password: "ChangeMe123!"
+    kubernetes_dashboard_insecure_http_enabled: true
     kubernetes_hardening_enabled: true
     kubernetes_harden_kubelet: true
     kubernetes_harden_network_policy: true
+    kubernetes_etcd_heartbeat_interval: "250"
+    kubernetes_etcd_election_timeout: "2500"
+    kubernetes_apiserver_etcd_timeout: "10s"
+    kubernetes_wait_timeout: 600
+    kubernetes_vip_enabled: true
+    kubernetes_vip_pool_start: "10.11.0.50"
+    kubernetes_vip_pool_end: "10.11.0.60"
+    kubernetes_ingress_publish_status_address: "10.11.0.50"
 
   tasks:
     - name: Kubernetes

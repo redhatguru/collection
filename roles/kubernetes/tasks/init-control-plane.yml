@@ -13,6 +13,8 @@
   become: true
 
 - name: Initialize the control plane
+  # kubeadm init has no --timeout flag (unlike kubeadm join); its internal
+  # phase timeouts aren't configurable via the CLI.
   ansible.builtin.command:
     cmd: >-
       kubeadm init

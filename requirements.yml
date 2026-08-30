@@ -3,3 +3,4 @@ collections:
   - name: community.general
   - name: community.postgresql
   - name: ansible.posix
+  - name: kubernetes.core

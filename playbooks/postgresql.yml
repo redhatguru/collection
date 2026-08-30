@@ -1,14 +1,8 @@
 ---
-# Example playbook for the postgresql role.
-#
-# Inventory:
-#   [postgresql]
-#   postgres-server-01
 - name: Deploy PostgreSQL
   hosts: postgresql
   become: true
   vars:
-    # PostgreSQL major version to install.
     postgresql_version: "17"
     # Database created, and the users granted full privileges on it. Add
     # more entries to create several users on the same database.
@@ -20,7 +14,6 @@
         password: "ChangeMe456!"
     # Password set for the postgres superuser during hardening.
     postgresql_root_password: "ChangeMeToo123!"
-    # CIDR allowed to connect with md5 auth in pg_hba.conf.
     postgresql_allow_subnet: "10.0.0.0/24"
     # Automatic pg_dump backups: where they land, and on what schedule
     # (cron fields; the defaults already run weekly, Sunday at 02:00).

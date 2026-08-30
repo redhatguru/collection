@@ -26,12 +26,45 @@ awx_service_type: "NodePort"
 # Only used when awx_service_type is "NodePort".
 awx_nodeport_port: 30080
 
+# Expose AWX through an Ingress instead of (or on top of) awx_service_type,
+# via the ingress-nginx controller installed by the kubernetes role
+# (kubernetes_ingress_enabled). awx_ingress_host must be set when this is
+# true. awx_ingress_tls_secret, if set, names a TLS secret already present
+# in awx_namespace to terminate HTTPS with; left empty, the Ingress is
+# HTTP-only.
+awx_ingress_enabled: false
+awx_ingress_host: ""
+awx_ingress_class_name: "nginx"
+awx_ingress_tls_secret: ""
+# Purely informational: which VIP (e.g. one from the kubernetes role's
+# kubernetes_vips/kubernetes_vip_pool_*) you intend awx_ingress_host's DNS
+# record to point at. Not required — the ingress-nginx controller answers
+# on every VIP a master holds regardless of which one DNS actually uses —
+# but setting it makes the report below print the exact DNS record needed
+# instead of you having to work it out yourself.
+awx_ingress_address: ""
+
 # AWX admin (superuser) account, created on first boot.
 awx_admin_user: "admin"
 awx_admin_password: "ChangeMe123!"
 
 # Number of AWX replicas.
 awx_replicas: 1
+
+# CPU/memory requests and limits for the task, web and ee (execution
+# environment, i.e. job pods) containers the operator creates.
+awx_task_cpu_request: "100m"
+awx_task_mem_request: "128Mi"
+awx_task_cpu_limit: "2000m"
+awx_task_mem_limit: "4Gi"
+awx_web_cpu_request: "100m"
+awx_web_mem_request: "128Mi"
+awx_web_cpu_limit: "1000m"
+awx_web_mem_limit: "4Gi"
+awx_ee_cpu_request: "100m"
+awx_ee_mem_request: "128Mi"
+awx_ee_cpu_limit: "1000m"
+awx_ee_mem_limit: "4Gi"
 
 # Pin the AWX application image tag independently of awx_operator_version.
 # Empty (the default) means "use whatever version the installed operator

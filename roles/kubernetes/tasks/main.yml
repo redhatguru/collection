@@ -29,6 +29,27 @@
   tags: cluster
   when: inventory_hostname in (groups['workers'] | default([]))
 
+- name: Tune etcd/kube-apiserver for slow disks
+  ansible.builtin.include_tasks: etcd-tuning.yml
+  tags: etcd-tuning
+  when: (inventory_hostname in (groups['single'] | default([]))) or
+    (inventory_hostname in (groups['masters'] | default([])))
+
+- name: Set up a floating VIP across the masters
+  ansible.builtin.include_tasks: vip.yml
+  tags: vip
+  when:
+    - kubernetes_vip_enabled | bool
+    - inventory_hostname in (groups['masters'] | default([]))
+
+- name: Install the ingress-nginx controller
+  ansible.builtin.include_tasks: ingress.yml
+  tags: ingress
+  when:
+    - kubernetes_ingress_enabled | bool
+    - (inventory_hostname in (groups['single'] | default([]))) or
+      (inventory_hostname == (groups['masters'] | default([]) | first | default('')))
+
 - name: Install Kubernetes Dashboard
   ansible.builtin.include_tasks: dashboard.yml
   tags: dashboard

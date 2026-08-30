@@ -1,0 +1,28 @@
+vrrp_script check_apiserver {
+    script "/usr/bin/bash -c 'echo > /dev/tcp/127.0.0.1/6443'"
+    interval 2
+    weight -30
+    fall 3
+    rise 2
+}
+
+{% for vip in kubernetes_vips %}
+vrrp_instance VI_{{ loop.index }} {
+    state {{ 'MASTER' if inventory_hostname == groups['masters'][0] else 'BACKUP' }}
+    interface {{ kubernetes_vip_interface }}
+    virtual_router_id {{ vip.router_id }}
+    priority {{ 150 if inventory_hostname == groups['masters'][0] else 100 }}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ kubernetes_vip_auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ vip.address }}
+    }
+    track_script {
+        check_apiserver
+    }
+}
+
+{% endfor %}

@@ -13,6 +13,9 @@
     mode: "0644"
   become: true
 
+# kubernetes.core.k8s has no kustomize support (it applies plain resource
+# definitions, not a kustomization.yaml directory), so this step is the
+# one place in this role that still shells out to kubectl.
 - name: Install the AWX Operator
   ansible.builtin.command: kubectl apply -k /etc/kubernetes/awx-operator-kustomize
   environment:
@@ -25,11 +28,16 @@
   until: awx_operator_apply.rc == 0
 
 - name: Wait for the AWX Operator controller-manager to become available
-  ansible.builtin.command: >-
-    kubectl wait --for=condition=Available
-    deployment/awx-operator-controller-manager
-    -n {{ awx_namespace }} --timeout={{ awx_wait_timeout }}s
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
+  kubernetes.core.k8s:
+    kubeconfig: /etc/kubernetes/admin.conf
+    api_version: apps/v1
+    kind: Deployment
+    name: awx-operator-controller-manager
+    namespace: "{{ awx_namespace }}"
+    state: present
+    wait: true
+    wait_condition:
+      type: Available
+      status: "True"
+    wait_timeout: "{{ awx_wait_timeout }}"
   become: true
-  changed_when: false

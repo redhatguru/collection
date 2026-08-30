@@ -3,13 +3,14 @@
   ansible.builtin.wait_for:
     host: "{{ kubernetes_control_plane_endpoint }}"
     port: 6443
-    timeout: 180
+    timeout: "{{ kubernetes_wait_timeout }}"
 
 - name: Join this node to the cluster as a worker
   when: hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] | length > 0
   block:
     - name: Attempt to join this node to the cluster
-      ansible.builtin.command: "{{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}"
+      ansible.builtin.command: >-
+        {{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}
       become: true
       args:
         creates: /etc/kubernetes/kubelet.conf
@@ -32,6 +33,7 @@
         seconds: 30
 
     - name: Retry joining this node to the cluster
-      ansible.builtin.command: "{{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}"
+      ansible.builtin.command: >-
+        {{ hostvars[groups['masters'][0]]['kubernetes_worker_join_command'] }}
       become: true
       changed_when: true

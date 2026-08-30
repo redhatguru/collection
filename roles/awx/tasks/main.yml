@@ -8,6 +8,20 @@
       (see the postgresql role).
     quiet: true
 
+- name: Ensure awx_ingress_host is set when the Ingress is enabled
+  ansible.builtin.assert:
+    that:
+      - awx_ingress_host | length > 0
+    fail_msg: >-
+      awx_ingress_host must be set to a hostname when awx_ingress_enabled
+      is true.
+    quiet: true
+  when: awx_ingress_enabled | bool
+
+- name: Install prerequisites for the kubernetes.core collection
+  ansible.builtin.include_tasks: prerequisites.yml
+  tags: prerequisites
+
 - name: Ensure the AWX namespace exists
   ansible.builtin.include_tasks: namespace.yml
   tags: namespace
@@ -23,6 +37,10 @@
 - name: Deploy AWX
   ansible.builtin.include_tasks: deploy.yml
   tags: deploy
+
+- name: Print access report
+  ansible.builtin.include_tasks: report.yml
+  tags: report
 
 # Opt-in only: never runs as part of a normal play, only when explicitly
 # requested with --tags upgrade. See tasks/upgrade.yml and the README.

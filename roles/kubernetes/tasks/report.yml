@@ -7,6 +7,23 @@
   changed_when: false
   register: kubernetes_report_nodes
 
+- name: Gather control-plane component restart counts
+  ansible.builtin.command: >-
+    kubectl -n kube-system get pods -l tier=control-plane
+    -o custom-columns=NAME:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount
+    --no-headers
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  register: kubernetes_report_control_plane
+
+- name: Flag control-plane components with high restart counts
+  ansible.builtin.set_fact:
+    kubernetes_report_control_plane_warning: >-
+      {{ kubernetes_report_control_plane.stdout_lines
+         | select('search', ' ([5-9]|[1-9][0-9]+)$') | list }}
+
 - name: Create a dashboard access token
   ansible.builtin.command: >-
     kubectl -n kubernetes-dashboard create token dashboard-user
@@ -24,13 +41,48 @@
       {{
         ['Nodes (STATUS column doubles as cluster health):', ''] +
         kubernetes_report_nodes.stdout_lines +
+        ['', 'Control-plane component restarts (kube-system, tier=control-plane):'] +
+        kubernetes_report_control_plane.stdout_lines +
+        (
+          [
+            '',
+            'WARNING: high restart counts above usually mean etcd/control-plane',
+            'instability from slow disk I/O (etcd is very latency-sensitive to',
+            'fsync). Check `top` for %wa and the etcd pod logs for "slow',
+            'fdatasync"/"apply request took too long" — see',
+            'kubernetes_etcd_heartbeat_interval/kubernetes_etcd_election_timeout',
+            'if the underlying disk cannot be made faster.'
+          ] if kubernetes_report_control_plane_warning | length > 0 else []
+        ) +
         (
           [
             '',
             'Dashboard: https://' + kubernetes_node_ip + ':' +
-              (kubernetes_dashboard_node_port | string) + '/',
-            'Token: ' + kubernetes_report_dashboard_token.stdout
-          ] if kubernetes_dashboard_enabled | bool
+              (kubernetes_dashboard_node_port | string) + '/'
+          ] +
+          (
+            ['Dashboard (Ingress): https://' + kubernetes_dashboard_ingress_host + '/']
+            if kubernetes_dashboard_ingress_enabled | bool else []
+          ) +
+          (
+            [
+              'DNS record needed: ' + kubernetes_dashboard_ingress_host +
+                ' -> ' + kubernetes_ingress_publish_status_address
+            ]
+            if (kubernetes_dashboard_ingress_enabled | bool
+                and kubernetes_ingress_publish_status_address | length > 0)
+            else []
+          ) +
+          (
+            [
+              'Ingress login — username: ' + kubernetes_dashboard_basic_auth_username,
+              'Ingress login — password: ' + kubernetes_dashboard_basic_auth_password
+            ]
+            if (kubernetes_dashboard_ingress_enabled | bool and kubernetes_dashboard_basic_auth_enabled | bool)
+            else []
+          ) +
+          ['Token: ' + kubernetes_report_dashboard_token.stdout]
+          if kubernetes_dashboard_enabled | bool
           else ['', 'Dashboard: disabled (kubernetes_dashboard_enabled: false)']
         )
       }}

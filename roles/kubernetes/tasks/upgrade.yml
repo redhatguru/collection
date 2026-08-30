@@ -15,7 +15,7 @@
 - name: Cordon and drain this node
   ansible.builtin.command: >-
     kubectl drain {{ inventory_hostname }}
-    --ignore-daemonsets --delete-emptydir-data --force --timeout=300s
+    --ignore-daemonsets --delete-emptydir-data --force --timeout={{ kubernetes_wait_timeout }}s
   delegate_to: "{{ kubernetes_upgrade_kubectl_host }}"
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf

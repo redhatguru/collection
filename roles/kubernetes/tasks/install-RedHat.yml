@@ -1,25 +1,18 @@
 ---
-- name: Ensure Firewalld is enabled and running
+# firewalld is disabled rather than configured: Calico (3.16+) inserts its
+# own ACCEPT rule into the FORWARD chain, but firewalld's REJECT rule in
+# that same chain can end up evaluated first regardless of zone/source
+# config, silently dropping pod-to-pod traffic between nodes ("Packet
+# filtered" on ping) — a known, acknowledged-wontfix conflict
+# (projectcalico/calico#4382), not something fixable by trusting
+# tunl0/node IPs. Cluster-internal traffic is instead governed by Calico's
+# own NetworkPolicy enforcement (see kubernetes_harden_network_policy).
+- name: Make sure Firewalld is disabled
   ansible.builtin.systemd:
     name: firewalld
-    state: started
-    enabled: true
+    state: stopped
+    enabled: false
   become: true
-
-- name: Allow full traffic from other cluster nodes through firewalld
-  ansible.posix.firewalld:
-    zone: trusted
-    source: "{{ hostvars[item]['kubernetes_node_ip'] }}/32"
-    permanent: true
-    immediate: true
-    state: enabled
-  become: true
-  loop: "{{ (groups['single'] | default([])) +
-    (groups['masters'] | default([])) +
-    (groups['workers'] | default([])) }}"
-  loop_control:
-    label: "{{ item }}"
-  when: item != inventory_hostname
 
 - name: Add Docker CE repo (for containerd.io)
   ansible.builtin.get_url:
