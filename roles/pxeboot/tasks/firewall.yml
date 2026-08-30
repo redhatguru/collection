@@ -1,0 +1,40 @@
+---
+- name: Allow DHCP-proxy and TFTP traffic through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: udp
+  become: true
+  loop:
+    - "67"
+    - "69"
+    - "4011"
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Ensure firewalld is installed and running
+  ansible.builtin.package:
+    name: firewalld
+    state: present
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Ensure firewalld is enabled and running
+  ansible.builtin.systemd:
+    name: firewalld
+    state: started
+    enabled: true
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Allow DHCP-proxy and TFTP traffic through firewalld
+  ansible.posix.firewalld:
+    port: "{{ item }}/udp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop:
+    - "67"
+    - "69"
+    - "4011"
+  when: ansible_facts['os_family'] == 'RedHat'

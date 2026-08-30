@@ -1,0 +1,61 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Detect the private-network IP
+      ansible.builtin.set_fact:
+        pxeboot_test_ip: >-
+          {{ (ansible_facts.interfaces
+              | map('extract', ansible_facts)
+              | selectattr('ipv4', 'defined')
+              | selectattr('ipv4.address', 'match', '^' + pxeboot_test_subnet_prefix + '\.')
+              | map(attribute='ipv4') | map(attribute='address')
+              | first) }}
+
+    - name: Check dnsmasq is active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, dnsmasq]
+      register: pxeboot_verify_dnsmasq
+      changed_when: false
+
+    - name: Assert dnsmasq is active
+      ansible.builtin.assert:
+        that: pxeboot_verify_dnsmasq.stdout == "active"
+
+    - name: Ensure a TFTP client is installed to test the server
+      ansible.builtin.package:
+        name: "{{ 'tftp-hpa' if ansible_facts['os_family'] == 'Debian' else 'tftp' }}"
+        state: present
+
+    - name: Fetch pxelinux.0 over real TFTP from this host's own PXE server
+      ansible.builtin.command:
+        argv: [tftp, "{{ pxeboot_test_ip }}", -c, get, pxelinux.0, /tmp/pxelinux.0.fetched]
+      changed_when: false
+
+    - name: Compare the fetched file against the one the role staged
+      ansible.builtin.command:
+        argv: [cmp, /tmp/pxelinux.0.fetched, /var/lib/tftpboot/pxelinux.0]
+      changed_when: false
+
+    - name: Check the Memtest86+ BIOS and UEFI boot images
+      ansible.builtin.stat:
+        path: "/var/lib/tftpboot/images/memtest/{{ item }}"
+      register: pxeboot_verify_memtest
+      loop:
+        - memtest.bin
+        - memtest.efi
+
+    - name: Assert the Memtest86+ boot images exist and are a plausible size
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.size > 100000
+      loop: "{{ pxeboot_verify_memtest.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Check the PXELINUX menu mentions Memtest86+
+      ansible.builtin.command:
+        argv: [grep, -q, Memtest86+, /var/lib/tftpboot/pxelinux.cfg/default]
+      changed_when: false

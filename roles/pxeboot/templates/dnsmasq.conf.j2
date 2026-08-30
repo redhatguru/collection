@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+#
+# Proxy-DHCP + TFTP for PXE network booting. Runs alongside any existing
+# DHCP server on this subnet: proxy mode only answers PXE-specific
+# requests and never hands out IP leases itself.
+
+# Disable dnsmasq's DNS server entirely — this instance only does
+# DHCP-proxy and TFTP, and leaving DNS on risks fighting systemd-resolved
+# (or any other resolver) for port 53 on this host.
+port=0
+
+interface={{ pxeboot_interface }}
+bind-interfaces
+
+dhcp-range={{ pxeboot_dhcp_range_start }},{{ pxeboot_dhcp_range_end }},proxy
+
+# Detect UEFI x86_64 clients (DHCP option 93, client-arch 7) so they boot
+# straight into Memtest86+'s .efi build; anything else falls back to the
+# BIOS PXELINUX chain below, which loads its own menu from
+# pxelinux.cfg/default.
+dhcp-match=set:efi-x86_64,option:client-arch,7
+dhcp-boot=tag:efi-x86_64,images/memtest/memtest.efi
+dhcp-boot=pxelinux.0
+
+enable-tftp
+tftp-root={{ pxeboot_tftp_root }}

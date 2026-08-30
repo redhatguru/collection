@@ -1,0 +1,34 @@
+---
+- name: Ensure dnsmasq and the PXELINUX bootloader packages are installed
+  ansible.builtin.apt:
+    name:
+      - dnsmasq
+      - pxelinux
+      - syslinux-common
+    state: present
+    update_cache: true
+  become: true
+
+- name: Ensure the TFTP root and its subdirectories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  become: true
+  loop:
+    - "{{ pxeboot_tftp_root }}"
+    - "{{ pxeboot_tftp_root }}/pxelinux.cfg"
+    - "{{ pxeboot_tftp_root }}/images/memtest"
+
+- name: Copy the PXELINUX bootloader and menu modules into the TFTP root
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ pxeboot_tftp_root }}/{{ item | basename }}"
+    mode: "0644"
+    remote_src: true
+  become: true
+  loop:
+    - /usr/lib/PXELINUX/pxelinux.0
+    - /usr/lib/syslinux/modules/bios/ldlinux.c32
+    - /usr/lib/syslinux/modules/bios/menu.c32
+    - /usr/lib/syslinux/modules/bios/libutil.c32

@@ -39,6 +39,7 @@ ansible-galaxy collection install -r requirements.yml
 | [`patching`](roles/patching) | Update all packages via `dnf`/`apt`, rebooting only when a reboot is actually required and explicitly allowed (`patching_reboot: true`). | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`kubernetes`](roles/kubernetes) | Install Kubernetes via `kubeadm` (containerd, Calico), as a single node or a `masters`/`workers` cluster, plus the Dashboard, opt-in hardening, and an opt-in rolling upgrade. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`awx`](roles/awx) | Deploy AWX on an existing Kubernetes cluster via the AWX Operator, using an external PostgreSQL database. | Any host with the `kubernetes` role already applied |
+| [`pxeboot`](roles/pxeboot) | Set up a PXE network boot server (proxy-DHCP + TFTP via `dnsmasq`), with Memtest86+ as the first BIOS/UEFI boot menu entry. | Rocky Linux 9, Ubuntu 24.04/26.04 |
 
 See each role's README for its full variable list and an example playbook.
 
@@ -54,7 +55,7 @@ Every role has at least a `roles/<role>/molecule/default` scenario that runs it
 in VirtualBox VMs via Vagrant, typically across Rocky Linux 9, Rocky Linux 10,
 Ubuntu 24.04 and Ubuntu 26.04 (see each role's README for its exact scenarios —
 `kubernetes` also has multi-node cluster scenarios, and `awx` a two-VM scenario
-on Ubuntu 26.04). From inside a role directory:
+on both Ubuntu 26.04 and Rocky Linux 9). From inside a role directory:
 
 ```bash
 pip install molecule "molecule-plugins[vagrant]" python-vagrant

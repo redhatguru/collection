@@ -1,0 +1,13 @@
+---
+- name: Print the PXE boot server report
+  ansible.builtin.debug:
+    msg:
+      - "TFTP root: {{ pxeboot_tftp_root }}"
+      - "Proxy-DHCP interface: {{ pxeboot_interface }} ({{ ansible_default_ipv4.address }})"
+      - "Proxy-DHCP range: {{ pxeboot_dhcp_range_start }} - {{ pxeboot_dhcp_range_end }}"
+      - "BIOS clients: PXELINUX menu, Memtest86+ {{ pxeboot_memtest_version }} available"
+      - "UEFI x86_64 clients: boot straight into Memtest86+ {{ pxeboot_memtest_version }} — no menu yet, only one entry so far"
+      - >-
+        If PXE clients don't discover this proxy automatically, point the
+        network's DHCP server's next-server/boot-server option at
+        {{ ansible_default_ipv4.address }}

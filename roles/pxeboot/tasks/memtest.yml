@@ -1,0 +1,45 @@
+---
+- name: Ensure unzip is present to extract the Memtest86+ archive
+  ansible.builtin.package:
+    name: unzip
+    state: present
+  become: true
+
+- name: Download the Memtest86+ release archive
+  ansible.builtin.get_url:
+    url: "https://www.memtest.org/download/v{{ pxeboot_memtest_version }}/mt86plus_{{ pxeboot_memtest_version }}.binaries.zip"
+    dest: "/tmp/mt86plus_{{ pxeboot_memtest_version }}.binaries.zip"
+    checksum: "{{ pxeboot_memtest_checksum }}"
+    mode: "0644"
+  become: true
+
+- name: Extract the Memtest86+ x86_64 binary
+  ansible.builtin.unarchive:
+    src: "/tmp/mt86plus_{{ pxeboot_memtest_version }}.binaries.zip"
+    dest: /tmp
+    remote_src: true
+    include:
+      - "mt86p_{{ pxeboot_memtest_version | replace('.', '') }}_x86_64"
+    creates: "/tmp/mt86p_{{ pxeboot_memtest_version | replace('.', '') }}_x86_64"
+  become: true
+
+- name: Stage the Memtest86+ binary for BIOS PXE boot (PXELINUX menu entry)
+  ansible.builtin.copy:
+    src: "/tmp/mt86p_{{ pxeboot_memtest_version | replace('.', '') }}_x86_64"
+    dest: "{{ pxeboot_tftp_root }}/images/memtest/memtest.bin"
+    mode: "0644"
+    remote_src: true
+  become: true
+
+- name: Stage the Memtest86+ binary for UEFI PXE boot
+  # The same binary is directly bootable by 64-bit UEFI firmware when
+  # served with a .efi extension — confirmed via memtest.org's own PXE FAQ
+  # and the project's build README (both describe one binary usable either
+  # way depending on how it's named/loaded). UEFI clients boot straight
+  # into it for now, since Memtest86+ is the only menu entry so far.
+  ansible.builtin.copy:
+    src: "/tmp/mt86p_{{ pxeboot_memtest_version | replace('.', '') }}_x86_64"
+    dest: "{{ pxeboot_tftp_root }}/images/memtest/memtest.efi"
+    mode: "0644"
+    remote_src: true
+  become: true

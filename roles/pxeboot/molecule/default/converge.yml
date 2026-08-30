@@ -1,0 +1,25 @@
+---
+- name: Detect each host's private-network interface
+  hosts: all
+  tasks:
+    - name: Detect the private-network interface
+      ansible.builtin.set_fact:
+        pxeboot_test_interface: >-
+          {{ (ansible_facts.interfaces
+              | map('extract', ansible_facts)
+              | selectattr('ipv4', 'defined')
+              | selectattr('ipv4.address', 'match', '^' + pxeboot_test_subnet_prefix + '\.')
+              | map(attribute='device')
+              | first) }}
+
+- name: Deploy the PXE boot server
+  hosts: all
+  become: true
+  vars:
+    pxeboot_interface: "{{ pxeboot_test_interface }}"
+    pxeboot_dhcp_range_start: "{{ pxeboot_test_subnet_prefix }}.50"
+    pxeboot_dhcp_range_end: "{{ pxeboot_test_subnet_prefix }}.100"
+  tasks:
+    - name: Include pxeboot role
+      ansible.builtin.include_role:
+        name: pxeboot

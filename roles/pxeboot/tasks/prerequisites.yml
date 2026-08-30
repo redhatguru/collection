@@ -1,0 +1,12 @@
+---
+- name: Ensure pxeboot_dhcp_range_start and pxeboot_dhcp_range_end are set
+  ansible.builtin.assert:
+    that:
+      - pxeboot_dhcp_range_start | length > 0
+      - pxeboot_dhcp_range_end | length > 0
+    fail_msg: >-
+      pxeboot_dhcp_range_start and pxeboot_dhcp_range_end must both be set
+      to the subnet range PXE clients boot from — proxy-DHCP mode still
+      needs to know which subnet to answer PXE requests on, even though
+      it never hands out leases itself.
+    quiet: true

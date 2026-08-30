@@ -1,0 +1,26 @@
+---
+# defaults file for pxeboot
+
+# Network interface dnsmasq listens for DHCP-proxy and TFTP requests on.
+pxeboot_interface: "{{ ansible_default_ipv4.interface }}"
+
+# Proxy-DHCP range covering the subnet PXE clients boot from. Proxy mode
+# only answers PXE-specific requests — it never hands out IP leases
+# itself — so it's safe to run alongside an existing DHCP server on the
+# same network. Both must be set; there is no full standalone-DHCP mode
+# (yet) — proxy mode is the safe default for a first PXE rollout.
+pxeboot_dhcp_range_start: ""
+pxeboot_dhcp_range_end: ""
+
+# Where boot files (bootloader, menu config, boot images) are served from
+# via TFTP.
+pxeboot_tftp_root: /var/lib/tftpboot
+
+# Memtest86+ release fetched from memtest.org, and its published SHA256
+# checksum (from https://www.memtest.org/download/v<version>/sha256sum.txt)
+# — verified against the actual upstream binaries.zip, not taken on faith.
+pxeboot_memtest_version: "8.10"
+pxeboot_memtest_checksum: "sha256:7e6c5162cb84ab959aeb9d13c9cfd6976b0dec3b34936b73820b20c55eb26c29"
+
+# Open the host firewall for DHCP-proxy (67, 4011) and TFTP (69) traffic.
+pxeboot_firewall_enabled: true

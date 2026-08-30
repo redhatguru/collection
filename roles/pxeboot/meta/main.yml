@@ -1,0 +1,27 @@
+---
+galaxy_info:
+  role_name: pxeboot
+  namespace: redhatguru
+  author: redhatguru
+  description: >-
+    Sets up a PXE network boot server (proxy-DHCP + TFTP, via dnsmasq)
+    with a Memtest86+ boot menu entry for BIOS and UEFI clients.
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+        - jammy
+    - name: EL
+      versions:
+        - "9"
+  galaxy_tags:
+    - pxe
+    - tftp
+    - dhcp
+    - dnsmasq
+    - memtest
+    - networking
+
+dependencies: []

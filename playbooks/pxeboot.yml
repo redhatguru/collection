@@ -1,0 +1,19 @@
+---
+# Example playbook for the pxeboot role.
+#
+# Inventory:
+#   [pxe_server]
+#   pxe-server-01
+- name: Deploy a PXE boot server
+  hosts: pxe_server
+  become: true
+  vars:
+    # Subnet range PXE clients boot from (proxy-DHCP mode — no leases
+    # are handed out, so this can run alongside an existing DHCP server).
+    pxeboot_dhcp_range_start: "10.0.0.50"
+    pxeboot_dhcp_range_end: "10.0.0.100"
+
+  tasks:
+    - name: PXE boot server
+      ansible.builtin.include_role:
+        name: redhatguru.general.pxeboot
