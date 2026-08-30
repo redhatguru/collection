@@ -1,13 +1,29 @@
 ---
 - name: Print the PXE boot server report
   ansible.builtin.debug:
-    msg:
-      - "TFTP root: {{ pxeboot_tftp_root }}"
-      - "Proxy-DHCP interface: {{ pxeboot_interface }} ({{ ansible_default_ipv4.address }})"
-      - "Proxy-DHCP range: {{ pxeboot_dhcp_range_start }} - {{ pxeboot_dhcp_range_end }}"
-      - "BIOS clients: PXELINUX menu, Memtest86+ {{ pxeboot_memtest_version }} available"
-      - "UEFI x86_64 clients: boot straight into Memtest86+ {{ pxeboot_memtest_version }} — no menu yet, only one entry so far"
-      - >-
-        If PXE clients don't discover this proxy automatically, point the
-        network's DHCP server's next-server/boot-server option at
-        {{ ansible_default_ipv4.address }}
+    msg: >-
+      {{
+        [
+          'TFTP root: ' + pxeboot_tftp_root,
+          'Interface: ' + pxeboot_interface + ' (' + ansible_default_ipv4.address + ')',
+          'BIOS clients: PXELINUX menu, Memtest86+ ' + pxeboot_memtest_version + ' available',
+          "UEFI x86_64 clients: boot straight into Memtest86+ " + pxeboot_memtest_version +
+            " (no menu yet, only one entry so far)"
+        ]
+        +
+        (
+          ['DHCP proxy: enabled, subnet address ' + pxeboot_dhcp_proxy_address]
+          if pxeboot_dhcp_proxy_enabled | bool
+          else
+          [
+            'DHCP proxy: disabled — configure these on your own DHCP server:',
+            '  next-server / TFTP server address: ' + ansible_default_ipv4.address,
+            '  filename (BIOS / default): pxelinux.0',
+            '  filename for UEFI x86_64 clients (DHCP option 93 = 7): images/memtest/memtest.efi',
+            '  (the exact syntax for a client-architecture-conditional filename' +
+            ' depends on your DHCP server software — e.g. a client class in' +
+            ' ISC dhcpd/Kea matching option 93, or a vendor-class policy on' +
+            ' Windows Server DHCP)'
+          ]
+        )
+      }}

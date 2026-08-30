@@ -1,16 +1,20 @@
 pxeboot
 =======
 
-Sets up a PXE network boot server: proxy-DHCP + TFTP via `dnsmasq`, with a
-PXELINUX boot menu for BIOS clients and direct UEFI boot support, both
-serving [Memtest86+](https://www.memtest.org/) as the first (and so far
-only) boot option.
+Sets up a PXE network boot server: TFTP via `dnsmasq`, with an optional
+proxy-DHCP service, a PXELINUX boot menu for BIOS clients, and direct UEFI
+boot support, both serving [Memtest86+](https://www.memtest.org/) as the
+first (and so far only) boot option.
 
-Proxy-DHCP mode means this role never hands out IP leases itself — it only
-answers PXE-specific DHCP requests — so it's safe to run alongside an
-existing DHCP server on the same network. There is no full standalone-DHCP
-mode (yet); proxy mode is the deliberate, safe default for a first PXE
-rollout.
+Proxy-DHCP (`pxeboot_dhcp_proxy_enabled`, default `true`) never hands out
+IP leases itself — it only answers PXE-specific DHCP requests — so it's
+safe to run alongside an existing DHCP server on the same network. If you
+already run your own DHCP server and would rather configure PXE booting
+there directly, set `pxeboot_dhcp_proxy_enabled: false`: this host then
+only serves TFTP, and the role's final report prints the exact
+next-server/filename settings to add to your DHCP server instead. There is
+no full standalone-DHCP mode (this role never hands out leases itself
+either way).
 
 How clients boot
 -----------------
@@ -27,8 +31,8 @@ Requirements
 ------------
 
 - A network interface on the subnet PXE clients boot from
-  (`pxeboot_interface`), and the DHCP-proxy range for that subnet
-  (`pxeboot_dhcp_range_start`/`pxeboot_dhcp_range_end`).
+  (`pxeboot_interface`). If using the built-in proxy-DHCP (the default),
+  also an address within that subnet (`pxeboot_dhcp_proxy_address`).
 - Outbound internet access to `www.memtest.org` to fetch the Memtest86+
   release archive (its SHA256 checksum is verified against the value in
   `pxeboot_memtest_checksum` — see defaults/main.yml).
@@ -50,11 +54,18 @@ Role Variables
 --------------
 
 - `pxeboot_interface` (default: the host's default-route interface) —
-  network interface dnsmasq listens for DHCP-proxy and TFTP requests on.
-- `pxeboot_dhcp_range_start` / `pxeboot_dhcp_range_end` (no default, must
-  both be set) — the subnet range PXE clients boot from. Proxy-DHCP mode
-  still needs to know which subnet to answer PXE requests on, even though
-  it never hands out leases itself.
+  network interface dnsmasq listens for TFTP (and DHCP-proxy, if enabled)
+  requests on.
+- `pxeboot_dhcp_proxy_enabled` (default `true`) — run dnsmasq's
+  proxy-DHCP service. Set to `false` if you already run your own DHCP
+  server and want to configure PXE booting there instead — see "Using
+  your own DHCP server" below.
+- `pxeboot_dhcp_proxy_address` (no default, must be set when
+  `pxeboot_dhcp_proxy_enabled` is true) — an address within the subnet
+  PXE clients boot from. Proxy-DHCP mode still needs to know which
+  (directly-connected) subnet to answer PXE requests on, even though it
+  never hands out leases itself — dnsmasq derives the netmask from the
+  interface automatically.
 - `pxeboot_tftp_root` (default `/var/lib/tftpboot`) — where boot files
   (bootloader, menu config, boot images) are served from via TFTP.
 - `pxeboot_memtest_version` (default `"8.10"`) — Memtest86+ release fetched
@@ -66,7 +77,23 @@ Role Variables
   `mt86plus_<version>.binaries.zip` entry). The download fails closed if
   they don't match.
 - `pxeboot_firewall_enabled` (default `true`) — open the host firewall
-  (`ufw`/`firewalld`) for DHCP-proxy (67, 4011) and TFTP (69) traffic.
+  (`ufw`/`firewalld`) for TFTP (69), and for DHCP-proxy (67, 4011) too
+  when `pxeboot_dhcp_proxy_enabled` is true.
+
+Using your own DHCP server
+---------------------------
+
+With `pxeboot_dhcp_proxy_enabled: false`, this host only serves TFTP —
+add these to your own DHCP server's configuration instead (the role's
+final report prints this too, with the actual IP filled in):
+
+- **next-server** / TFTP server address: this host's IP.
+- **filename** (BIOS / default): `pxelinux.0`.
+- **filename for UEFI x86_64 clients** (DHCP option 93 = 7):
+  `images/memtest/memtest.efi`. How to make this conditional on client
+  architecture depends on your DHCP server software — e.g. a client class
+  matching option 93 in ISC dhcpd/Kea, or a vendor-class policy on
+  Windows Server DHCP.
 
 Example Playbook
 ----------------
@@ -77,8 +104,7 @@ Example Playbook
   hosts: pxe_server
   become: true
   vars:
-    pxeboot_dhcp_range_start: "10.0.0.50"
-    pxeboot_dhcp_range_end: "10.0.0.100"
+    pxeboot_dhcp_proxy_address: "10.0.0.50"
   tasks:
     - name: PXE boot server
       ansible.builtin.include_role:

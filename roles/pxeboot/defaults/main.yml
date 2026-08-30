@@ -1,16 +1,24 @@
 ---
 # defaults file for pxeboot
 
-# Network interface dnsmasq listens for DHCP-proxy and TFTP requests on.
+# Network interface dnsmasq listens for DHCP-proxy and/or TFTP requests on.
 pxeboot_interface: "{{ ansible_default_ipv4.interface }}"
 
-# Proxy-DHCP range covering the subnet PXE clients boot from. Proxy mode
-# only answers PXE-specific requests — it never hands out IP leases
-# itself — so it's safe to run alongside an existing DHCP server on the
-# same network. Both must be set; there is no full standalone-DHCP mode
-# (yet) — proxy mode is the safe default for a first PXE rollout.
-pxeboot_dhcp_range_start: ""
-pxeboot_dhcp_range_end: ""
+# Whether this host should also run dnsmasq's proxy-DHCP service. It never
+# hands out IP leases itself — only PXE-specific information — so it's
+# safe to run alongside an existing DHCP server on the same network. Set
+# to false if you already run your own DHCP server and would rather
+# configure PXE booting there directly (see the report at the end of this
+# role for exactly which settings to add to it); this host then only
+# serves TFTP.
+pxeboot_dhcp_proxy_enabled: true
+
+# An address within the subnet PXE clients boot from — dnsmasq's
+# --dhcp-range=<addr>,proxy only needs one address to identify which
+# directly-connected subnet to answer PXE requests on (it auto-detects
+# the netmask from the interface). Must be set when
+# pxeboot_dhcp_proxy_enabled is true.
+pxeboot_dhcp_proxy_address: ""
 
 # Where boot files (bootloader, menu config, boot images) are served from
 # via TFTP.

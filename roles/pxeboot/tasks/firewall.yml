@@ -1,14 +1,16 @@
 ---
-- name: Allow DHCP-proxy and TFTP traffic through ufw
+- name: Determine which UDP ports need to be opened
+  ansible.builtin.set_fact:
+    pxeboot_firewall_udp_ports: >-
+      {{ ['69'] + (['67', '4011'] if pxeboot_dhcp_proxy_enabled | bool else []) }}
+
+- name: Allow TFTP (and DHCP-proxy, if enabled) traffic through ufw
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
     proto: udp
   become: true
-  loop:
-    - "67"
-    - "69"
-    - "4011"
+  loop: "{{ pxeboot_firewall_udp_ports }}"
   when: ansible_facts['os_family'] == 'Debian'
 
 - name: Ensure firewalld is installed and running
@@ -26,15 +28,12 @@
   become: true
   when: ansible_facts['os_family'] == 'RedHat'
 
-- name: Allow DHCP-proxy and TFTP traffic through firewalld
+- name: Allow TFTP (and DHCP-proxy, if enabled) traffic through firewalld
   ansible.posix.firewalld:
     port: "{{ item }}/udp"
     permanent: true
     immediate: true
     state: enabled
   become: true
-  loop:
-    - "67"
-    - "69"
-    - "4011"
+  loop: "{{ pxeboot_firewall_udp_ports }}"
   when: ansible_facts['os_family'] == 'RedHat'
