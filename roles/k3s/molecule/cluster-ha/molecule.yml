@@ -1,6 +1,5 @@
 ---
-# Scenario 3: three-node HA control plane plus a dedicated worker, on Rocky
-# Linux 9.
+# Three-node HA control plane plus a dedicated worker, on Rocky Linux 9.
 #
 # The same role and the same converge playbook as the single-node scenarios —
 # only the inventory differs, which is the whole claim this scenario exists to

@@ -56,9 +56,9 @@ See each role's README for its full variable list and an example playbook.
 Every role has at least one Molecule scenario that runs it in VirtualBox VMs
 via Vagrant, typically across Rocky Linux 9, Rocky Linux 10, Ubuntu 24.04 and
 Ubuntu 26.04 (see each role's README for its exact scenarios — `k3s` has
-`single-ubuntu`, `single-rockylinux` and a four-VM `cluster-ha` scenario, and
-`awx` a two-VM scenario on both Ubuntu 26.04 and Rocky Linux 9). From inside a
-role directory:
+`default`, `rockylinux` and a four-VM `cluster-ha` scenario, and `awx` a two-VM
+scenario on both Ubuntu 26.04 and Rocky Linux 9). From inside a role
+directory:
 
 ```bash
 pip install molecule "molecule-plugins[vagrant]" python-vagrant

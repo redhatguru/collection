@@ -1,9 +1,13 @@
 ---
-# Scenario 1: Ubuntu 24.04, single node.
+# The baseline scenario: Ubuntu 24.04, single node, ufw.
 #
 # One control-plane host and no workers, which is what makes the role derive
 # k3s_topology == 'single-node' and collapse Traefik to one replica.
-# The firewall backend here is ufw.
+#
+# Each single-node OS gets its own scenario rather than two platforms in this
+# one, because two hosts in k8s_control_plane are read as a single cluster with
+# two control-plane nodes — a configuration the role rejects outright, since an
+# etcd quorum of two means either failure stops the cluster.
 dependency:
   name: galaxy
 driver:

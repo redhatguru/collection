@@ -1,9 +1,9 @@
 ---
-# Scenario 2: Rocky Linux 9, single node.
+# The same single-node topology as the default scenario, on the other supported
+# OS family: Rocky Linux 9, firewalld, SELinux left enforcing.
 #
-# One control-plane host and no workers, which is what makes the role derive
-# k3s_topology == 'single-node' and collapse Traefik to one replica.
-# The firewall backend here is firewalld, with SELinux left enforcing.
+# This is where the firewalld path and the k3s-selinux policy are exercised —
+# the two things the role has to get right without ever disabling either.
 dependency:
   name: galaxy
 driver:

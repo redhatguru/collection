@@ -763,9 +763,14 @@ playbook — only the inventory differs, which is the claim being tested:
 
 | Scenario | Topology | OS | Firewall |
 | --- | --- | --- | --- |
-| `single-ubuntu` | single node | Ubuntu 24.04 | `ufw` |
-| `single-rockylinux` | single node | Rocky Linux 9 | `firewalld`, SELinux enforcing |
+| `default` | single node | Ubuntu 24.04 | `ufw` |
+| `rockylinux` | single node | Rocky Linux 9 | `firewalld`, SELinux enforcing |
 | `cluster-ha` | 3 control plane + 1 worker | Rocky Linux 9 | `firewalld` |
+
+The two single-node scenarios are separate rather than one scenario with two
+platforms: both hosts would land in `k8s_control_plane` and be read as a single
+cluster with two control-plane nodes, which the role rejects outright — an etcd
+quorum of two means either failure stops the cluster.
 
 Each one installs the cluster, runs again to prove idempotency, deploys an
 application through `k3s_app`, and then verifies: every node `Ready`,
@@ -787,8 +792,8 @@ ansible-galaxy collection install -r requirements.yml
 export ANSIBLE_LIBRARY="$(python3 -c 'import molecule_plugins, os; print(os.path.join(os.path.dirname(molecule_plugins.__file__), "vagrant", "modules"))')"
 
 cd roles/k3s
-molecule test -s single-ubuntu
-molecule test -s single-rockylinux
+molecule test                    # the default scenario: Ubuntu, single node
+molecule test -s rockylinux
 molecule test -s cluster-ha      # needs ~11 GB free memory on the host
 ```
 
