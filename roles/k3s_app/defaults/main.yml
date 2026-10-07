@@ -1,0 +1,150 @@
+---
+# defaults file for k3s_app
+#
+# This role talks to the Kubernetes API and nothing else — it never configures
+# a node. That is what lets applications be added, changed and removed without
+# touching the infrastructure role.
+
+# Credentials used to reach the cluster. The default is the kubeconfig K3s
+# writes on a control-plane node, which is why the playbook normally targets
+# the control-plane group.
+k3s_app_kubeconfig: "/etc/rancher/k3s/k3s.yaml"
+k3s_app_helm_binary: "/usr/local/bin/helm"
+
+# present  — create and update everything defined below
+# absent   — remove it again, in reverse order
+k3s_app_state: "present"
+
+# --------------------------------------------------------------------------
+# Python dependencies
+# --------------------------------------------------------------------------
+
+# kubernetes.core.k8s needs the Python Kubernetes client on the host that talks
+# to the API. The role installs it rather than assuming it.
+k3s_app_manage_python_dependencies: true
+# Used when the distribution has no python3-kubernetes package of its own
+# (RHEL without EPEL, for instance).
+k3s_app_pip_fallback_enabled: true
+k3s_app_pip_packages:
+  - kubernetes
+
+# --------------------------------------------------------------------------
+# Cluster conventions
+# --------------------------------------------------------------------------
+
+k3s_app_ingress_class: "traefik"
+# Namespace the ingress controller runs in. Used by the generated
+# NetworkPolicies to decide who may reach an application's pods.
+k3s_app_ingress_namespace: "traefik"
+
+# Pod Security Standard enforced on every namespace this role creates.
+# "restricted" is the strictest level and the one the generated workloads are
+# written to satisfy; drop to "baseline" for an application that genuinely
+# needs a privileged capability, and say so in the application definition.
+k3s_app_pod_security_level: "restricted"
+
+# --------------------------------------------------------------------------
+# Secure defaults applied to every workload
+# --------------------------------------------------------------------------
+
+# Every generated pod gets these unless the application overrides them. They
+# are exactly what the "restricted" Pod Security Standard requires, so an
+# application that keeps them needs no exception anywhere.
+k3s_app_default_pod_security_context:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+k3s_app_default_security_context:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop:
+      - ALL
+
+# Requests and limits are set by default: a pod without them is the first thing
+# to be killed under memory pressure and the first thing to starve a node.
+k3s_app_default_resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Off by default, because a mounted service-account token is a credential most
+# applications never use. Set service_account.automount per application for the
+# ones that talk to the API.
+k3s_app_default_automount_service_account_token: false
+
+# A default-deny NetworkPolicy per application namespace, together with the
+# allow-rules that keep it working (DNS, and ingress from the ingress
+# controller). Application-to-application traffic is denied until a policy
+# allows it explicitly.
+k3s_app_network_policy_enabled: true
+
+# A NetworkPolicy cannot select the API server by label — it is not a pod — so
+# egress to it has to be expressed as an address range. This is the cluster's
+# service CIDR, which the API server's ClusterIP comes out of.
+k3s_app_api_server_cidr: "10.43.0.0/16"
+k3s_app_api_server_port: 443
+
+# --------------------------------------------------------------------------
+# What to deploy
+# --------------------------------------------------------------------------
+
+# Applications, as declarative definitions. See README.md for the full schema
+# and inventories/lab-single-node/group_vars for a working example.
+#
+#   - name: hello
+#     namespace: hello
+#     enabled: true
+#     kind: Deployment
+#     replicas: 2
+#     image:
+#       repository: nginxinc/nginx-unprivileged
+#       tag: "1.27-alpine"
+#     ports:
+#       - {name: http, container_port: 8080}
+#     service:
+#       type: ClusterIP
+#       port: 80
+#       target_port: http
+#     ingress:
+#       enabled: true
+#       host: hello.example.local
+#       tls: true
+k3s_app_applications: []
+
+# Helm releases, for anything that already ships a chart.
+#
+#   - name: grafana
+#     namespace: monitoring
+#     chart_ref: grafana/grafana
+#     chart_repo_url: https://grafana.github.io/helm-charts
+#     chart_version: "8.5.0"
+#     values:
+#       adminPassword: "{{ vault_grafana_admin_password }}"
+k3s_app_helm_releases: []
+
+# Raw manifests, for the cases the application model above does not cover.
+# Each entry is a literal Kubernetes object.
+k3s_app_manifests: []
+
+# --------------------------------------------------------------------------
+# General
+# --------------------------------------------------------------------------
+
+# Seconds to wait for a workload or Helm release to become available.
+k3s_app_wait_timeout: 600
+
+# Wait for each workload to report itself available before continuing. Turn off
+# for a batch deployment where the applications depend on each other in an
+# order this role does not know about.
+k3s_app_wait: true
+
+k3s_app_debug: false

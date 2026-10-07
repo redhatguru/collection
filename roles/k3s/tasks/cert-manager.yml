@@ -1,0 +1,41 @@
+---
+- name: "ALL | Ensure the cert-manager chart repository is known to Helm"
+  kubernetes.core.helm_repository:
+    name: "{{ k3s_cert_manager_chart_repo_name }}"
+    repo_url: "{{ k3s_cert_manager_chart_repo_url }}"
+    binary_path: "{{ k3s_helm_binary }}"
+  become: true
+
+- name: "ALL | Ensure the cert-manager Helm values are on the bootstrap node"
+  ansible.builtin.template:
+    src: cert-manager-values.yaml.j2
+    dest: "{{ k3s_config_dir }}/cert-manager-values.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+
+- name: "ALL | Ensure cert-manager is installed and up to date"
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: "{{ k3s_cert_manager_chart_ref }}"
+    chart_version: "{{ k3s_cert_manager_chart_version | default(omit, true) }}"
+    release_namespace: "{{ k3s_cert_manager_namespace }}"
+    create_namespace: true
+    values_files:
+      - "{{ k3s_config_dir }}/cert-manager-values.yaml"
+    kubeconfig: "{{ k3s_kubeconfig }}"
+    binary_path: "{{ k3s_helm_binary }}"
+    wait: true
+    wait_timeout: "{{ k3s_wait_timeout }}s"
+  become: true
+
+- name: "ALL | Ensure the cert-manager ClusterIssuers are declared"
+  ansible.builtin.template:
+    src: cluster-issuers.yaml.j2
+    dest: "{{ k3s_manifests_dir }}/cert-manager-issuers.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when: (k3s_cert_manager_issuers | length + k3s_cert_manager_raw_issuers | length) > 0

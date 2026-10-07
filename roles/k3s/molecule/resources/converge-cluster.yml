@@ -1,0 +1,27 @@
+---
+# Builds the cluster described by the scenario's inventory. Imported by the
+# converge playbooks of every scenario — including the k3s_app role's —
+# so there is one place that knows how to turn Vagrant VMs into a cluster.
+
+- name: Work out which address each node should use for cluster traffic
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    # Vagrant boxes all share the same NAT address, so the default route is
+    # useless as a cluster address. The private network is the one the nodes
+    # can actually reach each other on.
+    - name: Use this node's private-network address as its cluster address
+      ansible.builtin.set_fact:
+        k3s_node_ip: >-
+          {{ ansible_facts['all_ipv4_addresses']
+             | select('match', '^' + k3s_test_subnet_prefix + '\.')
+             | first }}
+
+- name: Build the cluster from the inventory
+  hosts: all
+
+  tasks:
+    - name: Include the k3s role
+      ansible.builtin.include_role:
+        name: k3s

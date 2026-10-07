@@ -1,0 +1,51 @@
+---
+# The third way to deploy something, next to the application model and raw
+# manifests: a chart someone else maintains. Pin chart_version — an unpinned
+# chart makes the deployment as unreproducible as an unpinned image.
+
+- name: "ALL | Ensure the chart repositories the releases come from are known to Helm"
+  kubernetes.core.helm_repository:
+    name: "{{ item.chart_repo_name | default(item.chart_ref | split('/') | first) }}"
+    repo_url: "{{ item.chart_repo_url }}"
+    binary_path: "{{ k3s_app_helm_binary }}"
+  become: true
+  loop: "{{ k3s_app_helm_releases | selectattr('chart_repo_url', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.chart_repo_url }}"
+
+- name: "ALL | Ensure the namespaces the Helm releases go into have Pod Security labels"
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ item.namespace }}"
+        labels:
+          app.kubernetes.io/managed-by: ansible
+          pod-security.kubernetes.io/enforce: "{{ item.pod_security_level | default(k3s_app_pod_security_level) }}"
+          pod-security.kubernetes.io/enforce-version: latest
+          pod-security.kubernetes.io/warn: "{{ item.pod_security_level | default(k3s_app_pod_security_level) }}"
+    state: present
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  loop: "{{ k3s_app_helm_releases }}"
+  loop_control:
+    label: "{{ item.namespace }}"
+  when: k3s_app_state == 'present'
+
+- name: "ALL | Ensure the Helm releases match their definition"
+  kubernetes.core.helm:
+    name: "{{ item.name }}"
+    chart_ref: "{{ item.chart_ref }}"
+    chart_version: "{{ item.chart_version | default(omit) }}"
+    release_namespace: "{{ item.namespace }}"
+    release_state: "{{ k3s_app_state }}"
+    values: "{{ item.values | default({}) }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+    binary_path: "{{ k3s_app_helm_binary }}"
+    wait: "{{ k3s_app_wait | bool }}"
+    wait_timeout: "{{ k3s_app_wait_timeout }}s"
+  become: true
+  loop: "{{ k3s_app_helm_releases }}"
+  loop_control:
+    label: "{{ item.namespace }}/{{ item.name }}"

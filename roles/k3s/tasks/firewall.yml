@@ -1,0 +1,15 @@
+---
+- name: "ALL | Determine which firewall backend manages this host"
+  ansible.builtin.set_fact:
+    k3s_firewall_backend_name: >-
+      {{ k3s_firewall_backend
+         if k3s_firewall_backend | length > 0
+         else k3s_firewall_backend_default }}
+
+- name: "RHEL | Apply the firewalld rules for this node's role"
+  ansible.builtin.include_tasks: firewall-firewalld.yml
+  when: k3s_firewall_backend_name == 'firewalld'
+
+- name: "DEBIAN | Apply the ufw rules for this node's role"
+  ansible.builtin.include_tasks: firewall-ufw.yml
+  when: k3s_firewall_backend_name == 'ufw'

@@ -34,11 +34,11 @@ ansible-galaxy collection install -r requirements.yml
 
 | Role | Description | Supported platforms |
 | --- | --- | --- |
-| [`k3s`](roles/k3s) | Install a single-node K3s cluster without Traefik, plus `kubectl`. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`postgresql`](roles/postgresql) | Install and configure PostgreSQL, including database and user creation and `pg_hba.conf`/`postgresql.conf` hardening. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`patching`](roles/patching) | Update all packages via `dnf`/`apt`, rebooting only when a reboot is actually required and explicitly allowed (`patching_reboot: true`). | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
-| [`kubernetes`](roles/kubernetes) | Install Kubernetes via `kubeadm` (containerd, Calico), as a single node or a `masters`/`workers` cluster, plus the Dashboard, opt-in hardening, and an opt-in rolling upgrade. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
-| [`awx`](roles/awx) | Deploy AWX on an existing Kubernetes cluster via the AWX Operator, using an external PostgreSQL database. | Any host with the `kubernetes` role already applied |
+| [`k3s`](roles/k3s) | Install, configure and harden a K3s cluster — single node, single control plane with workers, or an HA embedded-etcd control plane, all derived from the inventory. Includes OS preparation, a node-role aware firewall that stays enabled, CIS-style hardening, MetalLB, Traefik (HA), cert-manager, etcd snapshots, post-install validation and a rolling upgrade. | RHEL/Rocky/AlmaLinux 9+, Ubuntu 22.04+, Debian 12+ (x86_64, ARM64) |
+| [`k3s_app`](roles/k3s_app) | Deploy applications onto an existing cluster from a declarative definition — namespace, workload, Service, Ingress, ConfigMaps, Secrets, PVCs and NetworkPolicies — plus raw manifests and Helm releases. Restricted Pod Security Standards and a default-deny NetworkPolicy by default. | Any host with a kubeconfig for the cluster |
+| [`awx`](roles/awx) | Deploy AWX on an existing Kubernetes cluster via the AWX Operator, using an external PostgreSQL database. | Any host with a `kubeadm` Kubernetes cluster already applied |
 | [`pxeboot`](roles/pxeboot) | Set up a PXE network boot server (proxy-DHCP + TFTP via `dnsmasq`), with Memtest86+ as the first BIOS/UEFI boot menu entry. | Rocky Linux 9, Ubuntu 24.04/26.04 |
 
 See each role's README for its full variable list and an example playbook.
@@ -46,16 +46,19 @@ See each role's README for its full variable list and an example playbook.
 ## Contents
 
 - `roles/` — reusable Ansible roles (see table above)
-- `playbooks/` — example/utility playbooks
+- `playbooks/` — `site.yml`, `k3s.yml`, `applications.yml` and
+  `upgrade.yml` for the K3s roles, plus other utility playbooks
+- `inventories/` — worked inventory examples (`lab-single-node`, `lab-ha`)
 - `plugins/` — custom modules, filters, and other plugins
 
 ## Testing
 
-Every role has at least a `roles/<role>/molecule/default` scenario that runs it
-in VirtualBox VMs via Vagrant, typically across Rocky Linux 9, Rocky Linux 10,
-Ubuntu 24.04 and Ubuntu 26.04 (see each role's README for its exact scenarios —
-`kubernetes` also has multi-node cluster scenarios, and `awx` a two-VM scenario
-on both Ubuntu 26.04 and Rocky Linux 9). From inside a role directory:
+Every role has at least one Molecule scenario that runs it in VirtualBox VMs
+via Vagrant, typically across Rocky Linux 9, Rocky Linux 10, Ubuntu 24.04 and
+Ubuntu 26.04 (see each role's README for its exact scenarios — `k3s` has
+`single-ubuntu`, `single-rockylinux` and a four-VM `cluster-ha` scenario, and
+`awx` a two-VM scenario on both Ubuntu 26.04 and Rocky Linux 9). From inside a
+role directory:
 
 ```bash
 pip install molecule "molecule-plugins[vagrant]" python-vagrant

@@ -1,0 +1,123 @@
+---
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+#
+# K3s reads this file on start, which is why the role configures the cluster
+# here instead of through a long INSTALL_K3S_EXEC command line: the running
+# configuration stays inspectable and a change is a file diff, not an argument
+# archaeology exercise.
+
+node-name: "{{ k3s_node_name }}"
+node-ip: "{{ k3s_node_ip }}"
+{% if k3s_node_external_ip | length > 0 %}
+node-external-ip: "{{ k3s_node_external_ip }}"
+{% endif %}
+data-dir: "{{ k3s_data_dir }}"
+
+# The shared cluster secret lives in a root-only file of its own, so it is
+# never part of this (world-readable-by-root-only but widely diffed) config.
+token-file: "{{ k3s_token_file }}"
+{% if k3s_node_role == 'control-plane' %}
+{% if not k3s_is_init_host | bool %}
+
+# Registration endpoint used to join and re-join the cluster.
+server: "https://{{ k3s_api_registration_address }}:{{ k3s_api_port }}"
+{% elif k3s_cluster_init | bool %}
+
+# Keeps the embedded etcd datastore in use. This must stay set for the life of
+# the node: removing it makes K3s fall back to sqlite and lose the cluster.
+cluster-init: true
+{% endif %}
+
+write-kubeconfig-mode: "{{ k3s_write_kubeconfig_mode }}"
+
+cluster-cidr: "{{ k3s_cluster_cidr }}"
+service-cidr: "{{ k3s_service_cidr }}"
+cluster-dns: "{{ k3s_cluster_dns }}"
+cluster-domain: "{{ k3s_cluster_domain }}"
+flannel-backend: "{{ k3s_flannel_backend }}"
+{% if not k3s_network_policy_controller_enabled | bool %}
+disable-network-policy: true
+{% endif %}
+{% if k3s_storage_local_path_enabled | bool %}
+default-local-storage-path: "{{ k3s_storage_local_path }}"
+{% endif %}
+{% if k3s_disabled_components | length > 0 %}
+
+# Bundled add-ons this role replaces or does not want. The packaged Traefik is
+# always in this list: it is deployed through K3s' HelmChart addon, which the
+# upstream chart beats on version pinning and on spreading replicas for HA.
+disable:
+{% for component in k3s_disabled_components %}
+  - "{{ component }}"
+{% endfor %}
+{% endif %}
+
+# Names and addresses the API server certificate is valid for, so kubectl and
+# the joining nodes can use any of them without a TLS warning.
+tls-san:
+{% for san in k3s_tls_sans %}
+  - "{{ san }}"
+{% endfor %}
+{% if k3s_hardening_enabled | bool and k3s_secrets_encryption_enabled | bool %}
+
+# Encrypts Secret values at rest in the datastore.
+secrets-encryption: true
+{% endif %}
+{% if k3s_taint_control_plane | bool %}
+
+node-taint:
+  - "CriticalAddonsOnly=true:NoExecute"
+{% endif %}
+{% if k3s_cluster_init | bool %}
+{% if k3s_etcd_backup_enabled | bool %}
+
+etcd-snapshot-schedule-cron: "{{ k3s_etcd_backup_schedule }}"
+etcd-snapshot-retention: {{ k3s_etcd_backup_retention | int }}
+etcd-snapshot-dir: "{{ k3s_etcd_backup_dir }}"
+{% else %}
+
+etcd-disable-snapshots: true
+{% endif %}
+{% endif %}
+{% if k3s_apiserver_args | length > 0 %}
+
+kube-apiserver-arg:
+{% for arg in k3s_apiserver_args %}
+  - "{{ arg }}"
+{% endfor %}
+{% endif %}
+{% if k3s_extra_server_args | length > 0 %}
+
+{% for arg in k3s_extra_server_args %}
+{{ arg }}
+{% endfor %}
+{% endif %}
+{% else %}
+
+# Registration endpoint this agent joins and re-joins the cluster through.
+server: "https://{{ k3s_api_registration_address }}:{{ k3s_api_port }}"
+{% if k3s_extra_agent_args | length > 0 %}
+
+{% for arg in k3s_extra_agent_args %}
+{{ arg }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if k3s_hardening_enabled | bool and k3s_protect_kernel_defaults | bool %}
+
+# Makes the kubelet refuse to start rather than silently rewrite kernel
+# parameters. The four sysctls it insists on are set by tasks/os.yml.
+protect-kernel-defaults: true
+{% endif %}
+{% if k3s_extra_kubelet_args | length > 0 %}
+
+kubelet-arg:
+{% for arg in k3s_extra_kubelet_args %}
+  - "{{ arg }}"
+{% endfor %}
+{% endif %}
+{% if k3s_extra_config | length > 0 %}
+
+# k3s_extra_config, merged verbatim.
+{{ k3s_extra_config | to_nice_yaml(indent=2) | trim }}
+{% endif %}

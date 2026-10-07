@@ -1,0 +1,365 @@
+---
+# Everything here runs before a single package is installed. The inventory-wide
+# checks use run_once so a topology mistake is reported once instead of once
+# per host.
+
+- name: "ALL | Ensure the operating system and architecture are supported"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] in k3s_supported_os_families
+      - ansible_facts['architecture'] in k3s_supported_architectures
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} on
+      {{ ansible_facts['architecture'] }}. This role supports the
+      {{ k3s_supported_os_families | join(' and ') }} families on
+      {{ k3s_supported_architectures | join(' or ') }}.
+    quiet: true
+
+- name: "RHEL | Ensure the distribution release is new enough"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution_major_version'] | int >= 9
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }}. RHEL 9 (Rocky Linux 9,
+      AlmaLinux 9) is the oldest supported release.
+    quiet: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Ensure the distribution release is new enough"
+  ansible.builtin.assert:
+    that:
+      - (ansible_facts['distribution'] == 'Ubuntu' and ansible_facts['distribution_version'] is version('22.04', '>='))
+        or (ansible_facts['distribution'] == 'Debian' and ansible_facts['distribution_major_version'] | int >= 12)
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }}. Ubuntu 22.04 or Debian 12
+      is the oldest supported release.
+    quiet: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Ensure this node has an address the rest of the cluster can reach it on"
+  ansible.builtin.assert:
+    that:
+      - k3s_node_ip | length > 0
+      - k3s_node_ip is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+      - k3s_node_name | length > 0
+      - k3s_node_name is match('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')
+    fail_msg: >-
+      k3s_node_ip ('{{ k3s_node_ip }}') must be an IPv4 address
+      and k3s_node_name ('{{ k3s_node_name }}') must be a valid
+      lowercase DNS name. On a host with no default route, or with several
+      NICs, set k3s_node_ip explicitly in host_vars.
+    quiet: true
+
+- name: "ALL | Ensure the inventory describes a cluster this role can build"
+  ansible.builtin.assert:
+    that:
+      - k3s_control_plane_hosts | length > 0
+      - k3s_init_host | length > 0
+    fail_msg: >-
+      Inventory group '{{ k3s_control_plane_group }}' is empty. At least
+      one control-plane host is required; add it there (and to
+      '{{ k3s_worker_group }}' only if you also want it to run
+      application workloads).
+    quiet: true
+  run_once: true
+
+- name: "ALL | Ensure the control-plane count keeps the etcd quorum intact"
+  ansible.builtin.assert:
+    that:
+      - (k3s_control_plane_hosts | length) == 1
+        or ((k3s_control_plane_hosts | length) >= 3 and (k3s_control_plane_hosts | length) % 2 == 1)
+    fail_msg: >-
+      {{ k3s_control_plane_hosts | length }} control-plane nodes cannot
+      form an etcd quorum. Embedded etcd needs either exactly 1 node (no
+      quorum, single-node or single control plane with workers) or an odd
+      number of at least 3. Two nodes is strictly worse than one: the quorum
+      becomes 2, so losing either node stops the cluster.
+    quiet: true
+  run_once: true
+
+- name: "ALL | Ensure an HA control plane is backed by embedded etcd"
+  ansible.builtin.assert:
+    that:
+      - k3s_cluster_init | bool
+    fail_msg: >-
+      k3s_topology is '{{ k3s_topology }}' but
+      k3s_cluster_init is false. More than one control-plane node
+      requires embedded etcd; the sqlite backend cannot be shared.
+    quiet: true
+  run_once: true
+  when: k3s_topology == 'ha'
+
+- name: "ALL | Ensure no node is both a control-plane node and a worker"
+  ansible.builtin.assert:
+    that:
+      - k3s_overlapping_hosts | length == 0
+    fail_msg: >-
+      {{ k3s_overlapping_hosts | join(', ') }} appear in both
+      '{{ k3s_control_plane_group }}' and
+      '{{ k3s_worker_group }}'. That places unprivileged workloads next
+      to etcd and the API server. Control-plane nodes already run workloads
+      unless k3s_taint_control_plane is enabled, so the worker group
+      entry is usually the mistake. Set
+      k3s_allow_control_plane_as_worker to accept it deliberately.
+    quiet: true
+  run_once: true
+  when: not k3s_allow_control_plane_as_worker | bool
+
+- name: "ALL | Ensure every node name and node address in the cluster is unique"
+  ansible.builtin.assert:
+    that:
+      - k3s_cluster_node_names | length == k3s_cluster_node_names | unique | length
+      - k3s_cluster_node_addresses | length == k3s_cluster_node_addresses | unique | length
+    fail_msg: >-
+      Duplicate node names or addresses found. Names:
+      {{ k3s_cluster_node_names | join(', ') }}. Addresses:
+      {{ k3s_cluster_node_addresses | join(', ') }}. Two nodes
+      registering under the same name or address will fight over the same
+      Node object.
+    quiet: true
+  vars:
+    k3s_cluster_node_names: >-
+      {{ k3s_cluster_hosts | map('extract', hostvars, 'k3s_node_name') | list }}
+  run_once: true
+
+- name: "ALL | Ensure every cluster node takes part in this play"
+  ansible.builtin.assert:
+    that:
+      - k3s_cluster_hosts | difference(ansible_play_hosts_all) | length == 0
+    fail_msg: >-
+      {{ k3s_cluster_hosts | difference(ansible_play_hosts_all) | join(', ') }}
+      belong to the cluster but are not in this play. The firewall rules and
+      the API registration address are derived from every node's facts, so the
+      play has to target all of them at once — run the playbook against the
+      whole cluster rather than with --limit.
+    quiet: true
+  run_once: true
+
+- name: "ALL | Determine the free space on the filesystem holding the K3s data"
+  ansible.builtin.set_fact:
+    k3s_preflight_disk_free_mb: >-
+      {{ ((ansible_facts['mounts']
+           | selectattr('mount', 'in', ['/', k3s_preflight_disk_path] | unique)
+           | sort(attribute='mount')
+           | map(attribute='size_available')
+           | list | last | default(0) | int) / 1048576) | round(0, 'floor') | int }}
+
+- name: "ALL | Ensure this node has enough CPU, memory and disk for its role"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['processor_vcpus'] | int >= k3s_preflight_min_cpu | int
+      - ansible_facts['memtotal_mb'] | int >= k3s_preflight_min_memory_mb | int
+      - k3s_preflight_disk_free_mb | int >= k3s_preflight_min_disk_free_mb | int
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_facts['processor_vcpus'] }} vCPU,
+      {{ ansible_facts['memtotal_mb'] }} MB RAM and
+      {{ k3s_preflight_disk_free_mb }} MB free on
+      {{ k3s_preflight_disk_path }}. The minimum is
+      {{ k3s_preflight_min_cpu }} vCPU,
+      {{ k3s_preflight_min_memory_mb }} MB RAM and
+      {{ k3s_preflight_min_disk_free_mb }} MB free.
+    quiet: true
+
+- name: "ALL | Ensure swap is either off or explicitly managed by this role"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['swaptotal_mb'] | int == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_facts['swaptotal_mb'] }} MB of
+      swap and k3s_disable_swap is false. The kubelet's memory
+      accounting assumes no swap; either let the role disable it or remove the
+      swap device yourself.
+    quiet: true
+  when: not k3s_disable_swap | bool
+
+- name: "ALL | Check that every other cluster node is reachable from this one"
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[item]['k3s_node_ip'] }}"
+    port: "{{ k3s_firewall_ssh_port | int }}"
+    timeout: 10
+  loop: "{{ k3s_cluster_hosts | difference([inventory_hostname]) }}"
+  loop_control:
+    label: "{{ item }} ({{ hostvars[item]['k3s_node_ip'] }})"
+  when: k3s_preflight_check_node_connectivity | bool
+
+- name: "ALL | Ensure the requested K3s and Helm versions are well formed"
+  ansible.builtin.assert:
+    that:
+      - k3s_version | length == 0 or k3s_version is match('^v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+$')
+      - k3s_helm_version | length == 0 or k3s_helm_version is match('^v[0-9]+\.[0-9]+\.[0-9]+$')
+      - k3s_version | length > 0 or k3s_channel | length > 0
+    fail_msg: >-
+      k3s_version must look like 'v1.31.5+k3s1' (got
+      '{{ k3s_version }}') and k3s_helm_version like
+      'v3.16.3' (got '{{ k3s_helm_version }}'). Leave either empty to
+      resolve it from the official release channel at run time.
+    quiet: true
+  run_once: true
+
+- name: "ALL | Ensure the shared cluster token is long enough to be a secret"
+  ansible.builtin.assert:
+    that:
+      - k3s_token | length >= 32
+    fail_msg: >-
+      k3s_token is set but only {{ k3s_token | length }}
+      characters long. Use at least 32 characters, and keep it in Ansible
+      Vault — it grants a node the right to join the cluster.
+    quiet: true
+  run_once: true
+  no_log: true
+  when: k3s_token | length > 0
+
+- name: "ALL | Ensure only one load balancer implementation serves LoadBalancer services"
+  ansible.builtin.assert:
+    that:
+      - not (k3s_metallb_enabled | bool and k3s_servicelb_enabled | bool)
+    fail_msg: >-
+      k3s_metallb_enabled and k3s_servicelb_enabled are both
+      true. K3s' bundled ServiceLB and MetalLB both answer for LoadBalancer
+      services and will fight over them; pick one.
+    quiet: true
+  run_once: true
+
+- name: "ALL | Ensure MetalLB has a usable address pool"
+  ansible.builtin.assert:
+    that:
+      - k3s_metallb_address_pools | length > 0
+      - k3s_metallb_address_pools | rejectattr('name', 'defined') | length == 0
+      - k3s_metallb_address_pools | rejectattr('addresses', 'defined') | length == 0
+      - k3s_metallb_address_pools | map(attribute='addresses') | flatten | length > 0
+    fail_msg: >-
+      k3s_metallb_address_pools must list at least one pool with a name
+      and addresses, for example:
+      [{name: default, addresses: ['10.10.50.100-10.10.50.110']}]. The
+      addresses have to be free on the nodes' own layer-2 segment and outside
+      the DHCP range — there is no safe default, so the role will not guess.
+    quiet: true
+  run_once: true
+  when: k3s_metallb_enabled | bool
+
+- name: "ALL | Ensure the MetalLB mode is one this role implements"
+  ansible.builtin.assert:
+    that:
+      - k3s_metallb_mode in ['layer2', 'bgp']
+      - k3s_metallb_mode != 'bgp' or k3s_metallb_bgp_peers | length > 0
+    fail_msg: >-
+      k3s_metallb_mode is '{{ k3s_metallb_mode }}'. Use 'layer2'
+      (no network configuration needed) or 'bgp' together with at least one
+      entry in k3s_metallb_bgp_peers.
+    quiet: true
+  run_once: true
+  when: k3s_metallb_enabled | bool
+
+- name: "ALL | Ensure the ingress is configured consistently"
+  ansible.builtin.assert:
+    that:
+      - k3s_traefik_external_traffic_policy in ['Cluster', 'Local']
+      - k3s_traefik_replica_count | int >= 1
+      - not (k3s_traefik_enabled | bool and not k3s_metallb_enabled | bool and not k3s_servicelb_enabled | bool)
+    fail_msg: >-
+      Traefik is enabled but nothing can give its Service an external address:
+      enable MetalLB (k3s_metallb_enabled) or K3s' ServiceLB
+      (k3s_servicelb_enabled). k3s_traefik_external_traffic_policy
+      must be 'Cluster' or 'Local' (got
+      '{{ k3s_traefik_external_traffic_policy }}') and the replica count
+      must be at least 1 (got {{ k3s_traefik_replica_count }}).
+    quiet: true
+  run_once: true
+  when: k3s_traefik_enabled | bool
+
+- name: "ALL | Ensure the Pod Security Standards levels are valid"
+  ansible.builtin.assert:
+    that:
+      - k3s_pod_security_enforce in ['privileged', 'baseline', 'restricted']
+      - k3s_pod_security_audit in ['privileged', 'baseline', 'restricted']
+      - k3s_pod_security_warn in ['privileged', 'baseline', 'restricted']
+    fail_msg: >-
+      k3s_pod_security_enforce/audit/warn must each be 'privileged',
+      'baseline' or 'restricted'. Note that enforcing 'restricted'
+      cluster-wide stops MetalLB's speaker from starting, because it
+      legitimately needs hostNetwork and NET_RAW — label individual
+      application namespaces instead.
+    quiet: true
+  run_once: true
+  when: k3s_pod_security_enabled | bool
+
+- name: "ALL | Ensure at most one StorageClass is marked as the cluster default"
+  ansible.builtin.assert:
+    that:
+      - k3s_storage_default_class_count | int <= 1
+    fail_msg: >-
+      {{ k3s_storage_default_class_count }} StorageClasses are marked
+      default. K3s' bundled local-path provisioner already is the default, so
+      disable it (k3s_storage_local_path_enabled) before marking one of
+      k3s_storage_extra_classes as default. Two defaults make the class
+      a PVC without an explicit storageClassName gets unpredictable.
+    quiet: true
+  vars:
+    k3s_storage_default_class_count: >-
+      {{ (k3s_storage_local_path_enabled | bool | ternary(1, 0))
+         + (k3s_storage_extra_classes | selectattr('is_default', 'defined')
+            | selectattr('is_default') | list | length) }}
+  run_once: true
+  when: k3s_storage_enabled | bool
+
+- name: "ALL | Ensure every cert-manager ClusterIssuer is fully specified"
+  ansible.builtin.assert:
+    that:
+      - k3s_cert_manager_issuers | rejectattr('name', 'defined') | length == 0
+      - k3s_cert_manager_issuers | rejectattr('type', 'defined') | length == 0
+      - k3s_cert_manager_issuers | map(attribute='type') | reject('in', ['selfsigned', 'ca', 'acme']) | length == 0
+      - k3s_cert_manager_issuers | selectattr('type', 'equalto', 'acme')
+        | rejectattr('acme_email', 'defined') | length == 0
+    fail_msg: >-
+      Every entry in k3s_cert_manager_issuers needs a name and a type of
+      'selfsigned', 'ca' or 'acme', and an 'acme' issuer also needs
+      acme_email. Let's Encrypt can only validate names that resolve on the
+      public internet — use the 'ca' type for a .local or otherwise internal
+      zone.
+    quiet: true
+  run_once: true
+  when: k3s_cert_manager_enabled | bool
+
+- name: "ALL | Ensure etcd snapshots are only scheduled where etcd actually runs"
+  ansible.builtin.assert:
+    that:
+      - k3s_cluster_init | bool
+    fail_msg: >-
+      k3s_etcd_backup_enabled is true but k3s_cluster_init is
+      false, so the cluster uses the sqlite backend, which has no snapshot
+      support. Enable embedded etcd, or back up
+      {{ k3s_server_dir }}/db/state.db yourself.
+    quiet: true
+  run_once: true
+  when: k3s_etcd_backup_enabled | bool
+
+- name: "ALL | Ensure the firewall backend is one this role implements"
+  ansible.builtin.assert:
+    that:
+      - k3s_firewall_backend_requested in ['firewalld', 'ufw']
+    fail_msg: >-
+      k3s_firewall_backend is '{{ k3s_firewall_backend }}'. This
+      role drives firewalld (RHEL family) or ufw (Debian family); leave it
+      empty to use the native backend for this OS. Both write nftables rules
+      underneath on the supported releases.
+    quiet: true
+  vars:
+    k3s_firewall_backend_requested: >-
+      {{ k3s_firewall_backend
+         if k3s_firewall_backend | length > 0
+         else k3s_firewall_backend_default }}
+  when: k3s_firewall_enabled | bool
+
+- name: "ALL | Ensure every ingress validation entry names a host"
+  ansible.builtin.assert:
+    that:
+      - k3s_validate_ingress_hosts | rejectattr('host', 'defined') | length == 0
+    fail_msg: >-
+      Every entry in k3s_validate_ingress_hosts needs a 'host' key, for
+      example: [{host: app1.example.local, path: /, status: [200, 404]}].
+    quiet: true
+  run_once: true
+  when: k3s_validate_enabled | bool

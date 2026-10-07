@@ -1,0 +1,20 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# The Pod Security labels are what actually enforce the standard for this
+# namespace. The cluster-wide default is a level lower, so that the components
+# that genuinely need host access keep working; an application namespace has no
+# such need and is held to the strict level here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/managed-by: ansible
+    pod-security.kubernetes.io/enforce: "{{ k3s_app_item.pod_security_level | default(k3s_app_pod_security_level) }}"
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: "{{ k3s_app_item.pod_security_level | default(k3s_app_pod_security_level) }}"
+    pod-security.kubernetes.io/warn: "{{ k3s_app_item.pod_security_level | default(k3s_app_pod_security_level) }}"
+{% for key, value in (k3s_app_item.namespace_labels | default({})).items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}

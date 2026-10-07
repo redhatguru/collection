@@ -1,0 +1,82 @@
+---
+# Helm is installed from the official release server and verified against the
+# checksum published next to the tarball. The get-helm-3 convenience script is
+# deliberately not used: it would mean piping a downloaded script into a shell.
+
+- name: "ALL | Resolve the latest Helm release when no version is pinned"
+  ansible.builtin.uri:
+    url: "{{ k3s_helm_latest_version_url }}"
+    return_content: true
+  register: k3s_helm_latest_response
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ k3s_init_host }}"
+  when: k3s_helm_version | length == 0
+
+- name: "ALL | Settle on the Helm release every control-plane node installs"
+  ansible.builtin.set_fact:
+    k3s_helm_release: >-
+      {{ k3s_helm_version
+         if k3s_helm_version | length > 0
+         else k3s_helm_latest_response.content | trim }}
+  run_once: true
+
+- name: "ALL | Check which Helm version is installed on this node"
+  ansible.builtin.command:
+    argv: ["{{ k3s_helm_binary }}", version, --template, "{{ '{{.Version}}' }}"]
+  register: k3s_helm_version_output
+  changed_when: false
+  failed_when: false
+
+- name: "ALL | Fetch the checksum published with this Helm release"
+  ansible.builtin.uri:
+    url: "{{ k3s_helm_release_url }}/{{ k3s_helm_archive }}.sha256sum"
+    return_content: true
+  register: k3s_helm_checksum_response
+  changed_when: false
+  when: k3s_helm_version_output.stdout | default('') != k3s_helm_release
+
+- name: "ALL | Extract the checksum of the Helm archive for this architecture"
+  ansible.builtin.set_fact:
+    k3s_helm_archive_checksum: >-
+      {{ k3s_helm_checksum_response.content
+         | regex_findall('[0-9a-f]{64}') | first | default('') }}
+  when: k3s_helm_version_output.stdout | default('') != k3s_helm_release
+
+- name: "ALL | Ensure a checksum was actually published for this Helm archive"
+  ansible.builtin.assert:
+    that:
+      - k3s_helm_archive_checksum is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      No SHA-256 checksum was found for {{ k3s_helm_archive }}. The role
+      will not install an unverified binary — check that Helm
+      {{ k3s_helm_release }} publishes a build for
+      {{ ansible_facts['architecture'] }}.
+    quiet: true
+  when: k3s_helm_version_output.stdout | default('') != k3s_helm_release
+
+- name: "ALL | Download and verify the Helm archive"
+  ansible.builtin.get_url:
+    url: "{{ k3s_helm_release_url }}/{{ k3s_helm_archive }}"
+    dest: "/tmp/{{ k3s_helm_archive }}"
+    checksum: "sha256:{{ k3s_helm_archive_checksum }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when: k3s_helm_version_output.stdout | default('') != k3s_helm_release
+
+- name: "ALL | Install the Helm binary"
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ k3s_helm_archive }}"
+    dest: "{{ k3s_helm_bin_dir }}"
+    remote_src: true
+    include:
+      - "linux-{{ k3s_release_architecture }}/helm"
+    extra_opts:
+      - --strip-components=1
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: k3s_helm_version_output.stdout | default('') != k3s_helm_release

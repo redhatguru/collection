@@ -1,0 +1,59 @@
+---
+# Nothing is piped into a shell here. The K3s binary is downloaded from the
+# official GitHub release and verified against that release's sha256sum file,
+# and the upstream install script is then run from disk with
+# INSTALL_K3S_SKIP_DOWNLOAD=true, so all it does is write the systemd unit.
+
+- name: "ALL | Check whether a K3s systemd unit already exists on this node"
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ k3s_service_name }}.service"
+  register: k3s_unit_file
+
+# Read by the restart handler: on a first install K3s is started with the right
+# configuration already in place, so there is nothing to restart.
+- name: "ALL | Record whether this node was already running K3s before this run"
+  ansible.builtin.set_fact:
+    k3s_service_pre_existing: "{{ k3s_unit_file.stat.exists }}"
+
+- name: "ALL | Install the verified K3s binary for the requested release"
+  ansible.builtin.include_tasks: install-k3s-binary.yml
+
+- name: "ALL | Download the official K3s install script"
+  ansible.builtin.get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: "{{ k3s_config_dir }}/install.sh"
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: not k3s_unit_file.stat.exists
+
+# Runs once per node, guarded by the unit file it creates. With
+# INSTALL_K3S_SKIP_DOWNLOAD the script neither downloads nor verifies anything
+# itself; it writes the systemd unit, sets up the kubectl/crictl symlinks and,
+# on SELinux hosts, installs the k3s-selinux policy from the Rancher
+# repository — which is why SELinux is left enforcing rather than relaxed.
+#
+# INSTALL_K3S_SKIP_START keeps the script from starting K3s as a side effect.
+# Which node starts first, and in what order the rest follow, decides whether
+# the cluster bootstraps cleanly, so that order belongs in the role
+# (server-init.yml, then server-join.yml, then agent-join.yml) rather than in
+# whichever order Ansible happens to reach the hosts.
+- name: "ALL | Install the K3s systemd unit for this node's role"
+  ansible.builtin.command:
+    cmd: "{{ k3s_config_dir }}/install.sh"
+  environment:
+    INSTALL_K3S_SKIP_DOWNLOAD: "true"
+    INSTALL_K3S_SKIP_START: "true"
+    INSTALL_K3S_BIN_DIR: "{{ k3s_bin_dir }}"
+    INSTALL_K3S_EXEC: "{{ 'server' if k3s_node_role == 'control-plane' else 'agent' }}"
+  become: true
+  args:
+    creates: "/etc/systemd/system/{{ k3s_service_name }}.service"
+
+- name: "ALL | Ensure the K3s service starts on boot"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    enabled: true
+    daemon_reload: true
+  become: true

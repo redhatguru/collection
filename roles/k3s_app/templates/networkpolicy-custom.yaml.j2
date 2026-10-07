@@ -1,0 +1,15 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# An explicit allow-rule from an application definition, for the traffic the
+# generated policies deliberately do not permit — one application reaching
+# another, or egress to something outside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ k3s_app_item.name }}-{{ k3s_app_object.name }}"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/managed-by: ansible
+spec:
+{{ k3s_app_object.spec | to_nice_yaml(indent=2) | trim | indent(2, true) }}

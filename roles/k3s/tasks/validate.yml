@@ -1,0 +1,164 @@
+---
+# Read-only checks, run once from the bootstrap node. Everything that can be
+# asked through a module is; the cluster queries go through `k3s kubectl`
+# because driving the API with kubernetes.core.k8s would add a Python
+# Kubernetes client to every control-plane node's dependency list for nothing
+# more than a handful of reads.
+
+- name: "ALL | Collect the readiness of every node in the cluster"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - nodes
+      - -o
+      - 'jsonpath={range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  register: k3s_validate_nodes
+  changed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 10) | round | int }}"
+  delay: 10
+  until:
+    - k3s_validate_nodes.stdout_lines | length == k3s_cluster_hosts | length
+    - k3s_validate_nodes.stdout_lines | select('search', '=True$') | list | length == k3s_cluster_hosts | length
+
+- name: "ALL | Ensure every node in the inventory joined and is Ready"
+  ansible.builtin.assert:
+    that:
+      - k3s_validate_nodes.stdout_lines | length == k3s_cluster_hosts | length
+      - k3s_validate_nodes.stdout_lines | reject('search', '=True$') | list | length == 0
+    fail_msg: >-
+      Expected {{ k3s_cluster_hosts | length }} Ready nodes, the cluster
+      reports: {{ k3s_validate_nodes.stdout_lines | join(', ') }}.
+    quiet: true
+
+- name: "ALL | Wait for the cluster add-on deployments to become available"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - deployment
+      - "{{ item.name }}"
+      - -n
+      - "{{ item.namespace }}"
+      - -o
+      - 'jsonpath={.status.conditions[?(@.type=="Available")].status}'
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  register: k3s_validate_deployment_state
+  changed_when: false
+  failed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 10) | round | int }}"
+  delay: 10
+  until: k3s_validate_deployment_state.stdout | default('') == 'True'
+  loop: "{{ k3s_validate_deployments }}"
+  loop_control:
+    label: "{{ item.namespace }}/{{ item.name }}"
+
+- name: "ALL | Wait for the cluster add-on daemonsets to become fully scheduled"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - daemonset
+      - "{{ item.name }}"
+      - -n
+      - "{{ item.namespace }}"
+      - -o
+      - 'jsonpath={.status.numberReady}/{.status.desiredNumberScheduled}'
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  register: k3s_validate_daemonset_state
+  changed_when: false
+  failed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 10) | round | int }}"
+  delay: 10
+  until:
+    - k3s_validate_daemonset_state.stdout | default('') is search('^[1-9]')
+    - (k3s_validate_daemonset_state.stdout | default('/') | split('/') | first)
+      == (k3s_validate_daemonset_state.stdout | default('/') | split('/') | last)
+  loop: "{{ k3s_validate_daemonsets }}"
+  loop_control:
+    label: "{{ item.namespace }}/{{ item.name }}"
+
+- name: "ALL | Look for pods that are neither running nor finished"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - pods
+      - --all-namespaces
+      - --field-selector=status.phase!=Running,status.phase!=Succeeded
+      - -o
+      - 'jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}={.status.phase}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  register: k3s_validate_unhealthy_pods
+  changed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 20) | round | int }}"
+  delay: 20
+  until: k3s_validate_unhealthy_pods.stdout | trim | length == 0
+
+- name: "ALL | Ensure no system pod is stuck"
+  ansible.builtin.assert:
+    that:
+      - k3s_validate_unhealthy_pods.stdout | trim | length == 0
+    fail_msg: >-
+      Pods are not running:
+      {{ k3s_validate_unhealthy_pods.stdout_lines | join(', ') }}.
+      Inspect them with
+      `sudo {{ k3s_binary }} kubectl describe pod -n <namespace> <name>`.
+    quiet: true
+
+- name: "ALL | Confirm the ingress Service has an address from the load balancer"
+  ansible.builtin.assert:
+    that:
+      - k3s_ingress_address | default('') | length > 0
+    fail_msg: >-
+      The Traefik Service has no external address. With MetalLB in layer-2
+      mode that normally means the configured pool
+      ({{ k3s_metallb_address_pools | map(attribute='addresses') | flatten | join(', ') }})
+      has no free address, or the pool is not on the nodes' own layer-2
+      segment. Check `sudo {{ k3s_binary }} kubectl -n
+      {{ k3s_metallb_namespace }} logs deploy/metallb-controller`.
+    quiet: true
+  when: k3s_traefik_enabled | bool
+
+- name: "ALL | Confirm the ingress answers on its published ports"
+  ansible.builtin.wait_for:
+    host: "{{ k3s_ingress_address }}"
+    port: "{{ item | int }}"
+    timeout: 60
+  loop: "{{ k3s_firewall_ingress_ports }}"
+  when:
+    - k3s_traefik_enabled | bool
+    - k3s_ingress_address | default('') | length > 0
+
+# Checked over plain HTTP with an explicit Host header: that proves the
+# hostname routing works without having to turn off certificate verification
+# for a self-signed default certificate. A 308 from the HTTP-to-HTTPS
+# redirect counts as a pass.
+- name: "ALL | Confirm each configured hostname is routed by the ingress"
+  ansible.builtin.uri:
+    url: "http://{{ k3s_ingress_address }}{{ item.path | default('/') }}"
+    headers:
+      Host: "{{ item.host }}"
+    follow_redirects: none
+    status_code: "{{ item.status | default([200, 301, 302, 308, 404]) }}"
+    timeout: 20
+  loop: "{{ k3s_validate_ingress_hosts }}"
+  loop_control:
+    label: "{{ item.host }}{{ item.path | default('/') }}"
+  changed_when: false
+  when:
+    - k3s_traefik_enabled | bool
+    - k3s_ingress_address | default('') | length > 0

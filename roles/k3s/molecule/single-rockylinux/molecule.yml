@@ -1,0 +1,56 @@
+---
+# Scenario 2: Rocky Linux 9, single node.
+#
+# One control-plane host and no workers, which is what makes the role derive
+# k3s_topology == 'single-node' and collapse Traefik to one replica.
+# The firewall backend here is firewalld, with SELinux left enforcing.
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  parallel: false
+  provider:
+    name: virtualbox
+platforms:
+  - name: k8s-rocky-single
+    box: bento/rockylinux-9
+    memory: 3072
+    cpus: 2
+    groups:
+      - k8s_control_plane
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.22.11
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "../../.."
+  playbooks:
+    prepare: ../resources/prepare.yml
+    converge: ../resources/converge.yml
+    verify: ../resources/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
+    host_vars:
+      k8s-rocky-single:
+        k3s_test_subnet_prefix: "10.10.22"
+        # cert-manager is covered by the two single-node scenarios; the HA
+        # scenario leaves it out to keep three VMs within reach.
+        k3s_cert_manager_enabled: true
+        k3s_cert_manager_issuers:
+          - name: internal-ca
+            type: ca
+            ca_common_name: "Molecule Root CA"
+verifier:
+  name: ansible
+ansible:
+  cfg:
+    ssh_connection:
+      retries: 5
+    defaults:
+      timeout: 60

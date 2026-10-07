@@ -1,0 +1,32 @@
+---
+# K3s' bundled local-path provisioner is the default StorageClass and is all a
+# single node needs. It is node-local storage: a pod rescheduled onto another
+# node does not find its data again, so it is not HA storage no matter how many
+# nodes the cluster has. See docs/architecture.md.
+
+- name: "ALL | Ensure the local-path provisioner has its storage directory"
+  ansible.builtin.file:
+    path: "{{ k3s_storage_local_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: k3s_storage_local_path_enabled | bool
+
+- name: "ALL | Ensure the additional storage classes are declared"
+  ansible.builtin.template:
+    src: storage-classes.yaml.j2
+    dest: "{{ k3s_manifests_dir }}/storage-classes.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when: k3s_storage_extra_classes | length > 0
+
+- name: "ALL | Remove the additional storage classes when none are configured"
+  ansible.builtin.file:
+    path: "{{ k3s_manifests_dir }}/storage-classes.yaml"
+    state: absent
+  become: true
+  when: k3s_storage_extra_classes | length == 0

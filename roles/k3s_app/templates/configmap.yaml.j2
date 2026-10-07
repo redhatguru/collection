@@ -1,0 +1,16 @@
+---
+# Managed by redhatguru.general.k3s_app
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ k3s_app_object.name }}"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/managed-by: ansible
+data:
+{% for key, value in (k3s_app_object.data | default({})).items() %}
+  {{ key }}: |
+{{ value | string | indent(4, true) }}
+{% endfor %}

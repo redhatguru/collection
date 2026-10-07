@@ -1,0 +1,4 @@
+---
+collections:
+  # kubernetes.core — k8s (manifests), helm (chart releases)
+  - name: kubernetes.core

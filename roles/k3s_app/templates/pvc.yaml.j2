@@ -1,0 +1,26 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# On a cluster backed by node-local storage (K3s' local-path provisioner) a
+# claim binds to one node's disk and the pod using it can only run there. See
+# the infrastructure role's docs/architecture.md on storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "{{ k3s_app_object.name }}"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/managed-by: ansible
+spec:
+  accessModes:
+{% for mode in k3s_app_object.access_modes | default(['ReadWriteOnce']) %}
+    - "{{ mode }}"
+{% endfor %}
+{% if k3s_app_object.storage_class is defined %}
+  storageClassName: "{{ k3s_app_object.storage_class }}"
+{% endif %}
+  resources:
+    requests:
+      storage: "{{ k3s_app_object.size }}"

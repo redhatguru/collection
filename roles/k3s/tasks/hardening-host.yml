@@ -1,0 +1,84 @@
+---
+- name: "ALL | Ensure swap is turned off for the running system"
+  ansible.builtin.command:
+    argv: [swapoff, --all]
+  become: true
+  changed_when: true
+  when:
+    - k3s_disable_swap | bool
+    - ansible_facts['swaptotal_mb'] | int > 0
+
+# Matches the three-field form of an fstab swap entry (device, mount point,
+# fstype) so a directory that merely happens to be called "swap" is left alone.
+- name: "ALL | Ensure no swap device is activated again after a reboot"
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\S+\s+\S+\s+swap\s+.*)$'
+    replace: '# \1'
+  become: true
+  when: k3s_disable_swap | bool
+
+- name: "ALL | Check which of the services that conflict with Kubernetes are present"
+  ansible.builtin.stat:
+    path: "/usr/lib/systemd/system/{{ item }}"
+  register: k3s_unused_service_units
+  loop: "{{ k3s_unused_services }}"
+  loop_control:
+    label: "{{ item }}"
+  when: k3s_disable_unused_services | bool
+
+# Masked rather than only stopped: nm-cloud-setup is started by a timer and by
+# NetworkManager dispatcher scripts, so stopping it is not enough to keep it
+# from rewriting the routes the CNI installed.
+- name: "ALL | Ensure the services that conflict with the container network are masked"
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    state: stopped
+    enabled: false
+    masked: true
+  become: true
+  loop: "{{ k3s_unused_service_units.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - k3s_disable_unused_services | bool
+    - item.stat.exists | default(false)
+
+- name: "ALL | Ensure the network hardening sysctl settings are applied"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-k3s-hardening.conf
+    sysctl_set: true
+    reload: true
+    state: present
+  become: true
+  loop: "{{ k3s_sysctl_hardening_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  when: k3s_sysctl_hardening_enabled | bool
+
+- name: "RHEL | Check whether NetworkManager manages this host's interfaces"
+  ansible.builtin.stat:
+    path: /usr/sbin/NetworkManager
+  register: k3s_networkmanager_binary
+  when: ansible_facts['os_family'] == 'RedHat'
+
+# NetworkManager takes ownership of cni0/flannel.1 when they appear and then
+# tears their addresses and routes down again. Upstream K3s documents this
+# exclusion as a requirement on RHEL-family hosts.
+- name: "RHEL | Ensure NetworkManager leaves the CNI interfaces alone"
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/90-k3s-unmanaged.conf
+    content: |
+      # Managed by redhatguru.general.k3s
+      [keyfile]
+      unmanaged-devices={{ k3s_firewall_trusted_interfaces | map('regex_replace', '^', 'interface-name:') | join(';') }}
+    mode: "0644"
+    owner: root
+    group: root
+  become: true
+  notify: "reload networkmanager"
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - k3s_networkmanager_binary.stat.exists | default(false)

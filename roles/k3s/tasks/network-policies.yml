@@ -1,0 +1,9 @@
+---
+- name: "ALL | Ensure the cluster-level NetworkPolicies are declared"
+  ansible.builtin.template:
+    src: network-policies.yaml.j2
+    dest: "{{ k3s_manifests_dir }}/network-policies.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true

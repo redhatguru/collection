@@ -1,0 +1,15 @@
+---
+# K3s takes the snapshots itself on the schedule set in config.yaml, so there
+# is no cron job to install here — only the directory it writes them to, kept
+# root-only because an etcd snapshot contains every Secret in the cluster.
+#
+# Restore procedure: docs/architecture.md, "Disaster recovery".
+
+- name: "ALL | Ensure the etcd snapshot directory exists and is root-only"
+  ansible.builtin.file:
+    path: "{{ k3s_etcd_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true

@@ -1,0 +1,46 @@
+---
+# The deny and the allow-rules are applied as one set. Splitting them, or
+# enabling the deny without the rest, leaves the namespace unable to resolve a
+# name or be reached by the ingress.
+
+- name: "ALL | Ensure all traffic in the application namespace is denied by default"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy-default-deny.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+
+- name: "ALL | Ensure the application can still resolve names through CoreDNS"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy-allow-dns.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  when: k3s_app_item.network_policy.allow_dns | default(true) | bool
+
+- name: "ALL | Ensure the ingress controller can still reach the application"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy-allow-ingress.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  when: k3s_app_item.network_policy.allow_from_ingress | default(true) | bool
+
+- name: "ALL | Ensure the application can reach the Kubernetes API when it needs to"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy-allow-apiserver.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  when: k3s_app_item.network_policy.allow_api_server | default(false) | bool
+
+- name: "ALL | Ensure the explicitly allowed traffic for this application is permitted"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'networkpolicy-custom.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  loop: "{{ k3s_app_item.network_policy.extra | default([]) }}"
+  loop_control:
+    loop_var: k3s_app_object
+    label: "{{ k3s_app_object.name }}"

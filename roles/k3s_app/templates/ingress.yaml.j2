@@ -1,0 +1,46 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# Every application gets its own Ingress on its own hostname, all of them
+# pointing at the same ingress load-balancer address in DNS. Traefik then
+# routes on the hostname, which is why adding the fiftieth application costs
+# one more DNS record and no extra address.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: "{{ k3s_app_item.name }}"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/managed-by: ansible
+  annotations:
+{% if k3s_app_item.ingress.cluster_issuer is defined %}
+    # cert-manager watches this annotation and issues the certificate into the
+    # TLS secret named below.
+    cert-manager.io/cluster-issuer: "{{ k3s_app_item.ingress.cluster_issuer }}"
+{% endif %}
+{% for key, value in (k3s_app_item.ingress.annotations | default({})).items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+spec:
+  ingressClassName: "{{ k3s_app_item.ingress.class_name | default(k3s_app_ingress_class) }}"
+{% if k3s_app_item.ingress.tls | default(false) | bool %}
+  tls:
+    - hosts:
+        - "{{ k3s_app_item.ingress.host }}"
+      secretName: "{{ k3s_app_item.ingress.tls_secret | default(k3s_app_item.name ~ '-tls') }}"
+{% endif %}
+  rules:
+    - host: "{{ k3s_app_item.ingress.host }}"
+      http:
+        paths:
+{% for path in k3s_app_item.ingress.paths | default([{'path': k3s_app_item.ingress.path | default('/')}]) %}
+          - path: "{{ path.path | default('/') }}"
+            pathType: "{{ path.path_type | default('Prefix') }}"
+            backend:
+              service:
+                name: "{{ path.service | default(k3s_app_item.name) }}"
+                port:
+                  number: {{ path.service_port | default(k3s_app_item.service.port) | int }}
+{% endfor %}

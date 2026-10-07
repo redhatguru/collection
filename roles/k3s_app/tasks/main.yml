@@ -1,0 +1,41 @@
+---
+- name: "ALL | Load the OS-family specific variables"
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+  tags: always
+
+- name: "ALL | Ensure the Python Kubernetes client is available"
+  ansible.builtin.include_tasks: dependencies.yml
+  tags: dependencies
+  when: k3s_app_manage_python_dependencies | bool
+
+- name: "ALL | Verify every application definition is complete"
+  ansible.builtin.include_tasks: preflight.yml
+  tags: preflight
+
+- name: "ALL | Deploy the declared applications"
+  ansible.builtin.include_tasks: application.yml
+  tags: applications
+  loop: "{{ k3s_app_enabled_applications }}"
+  loop_control:
+    loop_var: k3s_app_item
+    label: "{{ k3s_app_item.namespace | default(k3s_app_item.name) }}/{{ k3s_app_item.name }}"
+
+- name: "ALL | Deploy the declared Helm releases"
+  ansible.builtin.include_tasks: helm.yml
+  tags: helm
+  when: k3s_app_helm_releases | length > 0
+
+- name: "ALL | Apply the raw Kubernetes manifests"
+  kubernetes.core.k8s:
+    definition: "{{ item }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  tags: manifests
+  loop: "{{ k3s_app_manifests }}"
+  loop_control:
+    label: "{{ item.kind | default('object') }}/{{ item.metadata.name | default('') }}"
+
+- name: "ALL | Print the application report"
+  ansible.builtin.include_tasks: report.yml
+  tags: report

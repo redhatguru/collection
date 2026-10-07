@@ -1,0 +1,8 @@
+---
+# Everything, in the right order: the cluster first, then the applications
+# that run on it.
+- name: Build the Kubernetes cluster
+  ansible.builtin.import_playbook: k3s.yml
+
+- name: Deploy the applications
+  ansible.builtin.import_playbook: applications.yml

@@ -1,0 +1,142 @@
+---
+# Only reachable with --tags upgrade, and then only once
+# k3s_upgrade_enabled is true as well.
+#
+# One node at a time is enforced below rather than assumed: upgrading several
+# control-plane nodes at once loses the etcd quorum. playbooks/upgrade.yml runs
+# the control plane and the workers as two plays with serial: 1, which is what
+# produces the order: one control-plane node, health gate, next control-plane
+# node, then the workers.
+#
+# See docs/architecture.md, "Upgrades", for the full procedure.
+
+- name: "ALL | Ensure the upgrade runs one node at a time"
+  ansible.builtin.assert:
+    that:
+      - ansible_play_batch | length == 1
+    fail_msg: >-
+      This upgrade would touch {{ ansible_play_batch | length }} nodes at once
+      ({{ ansible_play_batch | join(', ') }}), which loses the etcd quorum on
+      an HA control plane and takes the ingress down everywhere else. Run the
+      play with serial: 1 — playbooks/upgrade.yml does that already.
+    quiet: true
+
+- name: "ALL | Ensure the upgrade was asked for deliberately"
+  ansible.builtin.assert:
+    that:
+      - k3s_upgrade_enabled | bool
+    fail_msg: >-
+      This play was run with --tags upgrade but k3s_upgrade_enabled is
+      false. Set it to true, and set k3s_version to the release you
+      want, before upgrading a running cluster.
+    quiet: true
+
+- name: "ALL | Resolve which K3s release this upgrade targets"
+  ansible.builtin.include_tasks: resolve-k3s-release.yml
+
+- name: "ALL | Check which K3s version this node is running"
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", --version]
+  register: k3s_upgrade_current_output
+  changed_when: false
+  failed_when: false
+
+- name: "ALL | Determine whether this node still has to be upgraded"
+  ansible.builtin.set_fact:
+    k3s_upgrade_needed: >-
+      {{ (k3s_upgrade_current_output.stdout | default('')
+          | regex_search('k3s version (v[0-9.]+\+k3s[0-9]+)', '\1')
+          | first | default('')) != k3s_release }}
+
+- name: "ALL | Take an etcd snapshot before touching this control-plane node"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - etcd-snapshot
+      - save
+      - --name
+      - "pre-upgrade-{{ k3s_release | replace('+', '-') }}"
+  become: true
+  changed_when: true
+  when:
+    - k3s_upgrade_needed | bool
+    - k3s_upgrade_snapshot_before | bool
+    - k3s_node_role == 'control-plane'
+    - k3s_cluster_init | bool
+
+# Skipped on a single-node cluster: there is nowhere for the evicted pods to
+# go, so draining only means a longer outage than the restart itself.
+- name: "ALL | Drain the workloads off this node before upgrading it"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - drain
+      - "{{ k3s_node_name }}"
+      - --ignore-daemonsets
+      - --delete-emptydir-data
+      - --force
+      - "--timeout={{ k3s_upgrade_drain_timeout }}s"
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  delegate_to: "{{ k3s_init_host }}"
+  changed_when: true
+  when:
+    - k3s_upgrade_needed | bool
+    - k3s_upgrade_drain_enabled | bool
+    - k3s_cluster_hosts | length > 1
+
+- name: "ALL | Install the verified K3s binary for the target release"
+  ansible.builtin.include_tasks: install-k3s-binary.yml
+  when: k3s_upgrade_needed | bool
+
+- name: "ALL | Restart K3s so the node runs the new binary"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    state: restarted
+  become: true
+  when: k3s_upgrade_needed | bool
+
+- name: "ALL | Wait for the upgraded node to be Ready again"
+  ansible.builtin.include_tasks: wait-node-ready.yml
+  when: k3s_upgrade_needed | bool
+
+- name: "ALL | Allow workloads back onto this node"
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", kubectl, uncordon, "{{ k3s_node_name }}"]
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  delegate_to: "{{ k3s_init_host }}"
+  changed_when: true
+  when:
+    - k3s_upgrade_needed | bool
+    - k3s_upgrade_drain_enabled | bool
+    - k3s_cluster_hosts | length > 1
+
+# The health gate between nodes: the next node is not touched until the whole
+# cluster is Ready again, which is what makes this a rolling upgrade rather
+# than a simultaneous one.
+- name: "ALL | Wait for the whole cluster to be Ready before moving to the next node"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - nodes
+      - -o
+      - 'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  delegate_to: "{{ k3s_init_host }}"
+  register: k3s_upgrade_cluster_state
+  changed_when: false
+  failed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 10) | round | int }}"
+  delay: 10
+  until:
+    - k3s_upgrade_cluster_state.stdout_lines | default([]) | length == k3s_cluster_hosts | length
+    - k3s_upgrade_cluster_state.stdout_lines | default([]) | reject('equalto', 'True') | list | length == 0
+  when: k3s_upgrade_needed | bool

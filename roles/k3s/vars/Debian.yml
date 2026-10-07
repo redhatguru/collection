@@ -1,0 +1,27 @@
+---
+# Debian-family specifics, loaded by tasks/main.yml from the os_family fact.
+
+k3s_os_family: "Debian"
+k3s_package_manager: "apt"
+k3s_service_manager: "systemd"
+k3s_firewall_backend_default: "ufw"
+k3s_firewall_package: "ufw"
+
+# python3-yaml is needed on the node because kubernetes.core.helm renders its
+# values files there; the rest is what K3s itself expects to find.
+k3s_prerequisite_packages:
+  - ca-certificates
+  - conntrack
+  - curl
+  - gzip
+  - iptables
+  - python3-yaml
+  - socat
+  - tar
+
+k3s_time_sync_package: "chrony"
+k3s_time_sync_service: "chrony"
+
+# Nothing on Debian/Ubuntu interferes with the CNI the way nm-cloud-setup does
+# on RHEL, so there is nothing to mask here by default.
+k3s_unused_services: []

@@ -1,6 +1,150 @@
 ---
-- name: Install K3S
-  ansible.builtin.import_tasks:
-    file: install-rancher.yml
-  tags: install
-...
+- name: "ALL | Load the OS-family specific variables"
+  ansible.builtin.include_vars: "{{ ansible_facts['os_family'] }}.yml"
+  tags: always
+
+# Materialized into real facts rather than left as live-templated defaults, so
+# that every other host can read them reliably through hostvars — the firewall
+# rules and the API registration address both depend on knowing the other
+# nodes' addresses.
+- name: "ALL | Materialize this node's identity and derived role as facts"
+  ansible.builtin.set_fact:
+    k3s_node_name: "{{ k3s_node_name }}"
+    k3s_node_ip: "{{ k3s_node_ip }}"
+    k3s_node_role: "{{ k3s_node_role }}"
+    k3s_topology: "{{ k3s_topology }}"
+  tags: always
+
+- name: "ALL | Verify the hosts and the inventory can support the requested cluster"
+  ansible.builtin.include_tasks: preflight.yml
+  tags: preflight
+  when: k3s_preflight_enabled | bool
+
+- name: "ALL | Prepare the operating system for Kubernetes"
+  ansible.builtin.include_tasks: os.yml
+  tags: os
+  when: k3s_os_prepare_enabled | bool
+
+- name: "ALL | Harden the host before Kubernetes is installed on it"
+  ansible.builtin.include_tasks: hardening-host.yml
+  tags: hardening
+  when: k3s_hardening_enabled | bool
+
+- name: "ALL | Open the host firewall for exactly the traffic this node's role needs"
+  ansible.builtin.include_tasks: firewall.yml
+  tags: firewall
+  when: k3s_firewall_enabled | bool
+
+- name: "ALL | Write the K3s configuration, audit policy and admission configuration"
+  ansible.builtin.include_tasks: k3s-config.yml
+  tags: k3s
+
+- name: "ALL | Install the verified K3s binary and its systemd unit"
+  ansible.builtin.include_tasks: k3s-install.yml
+  tags: k3s
+
+# Flushed here rather than at the end of the play: everything below talks to
+# the cluster, and it has to talk to a cluster running the configuration this
+# run just wrote.
+- name: "ALL | Apply any pending K3s restarts before configuring the cluster"
+  ansible.builtin.meta: flush_handlers
+  tags: always
+
+- name: "ALL | Bootstrap the first control-plane node"
+  ansible.builtin.include_tasks: server-init.yml
+  tags: cluster
+  when: k3s_is_init_host | bool
+
+- name: "ALL | Join the remaining control-plane nodes to the cluster, one at a time"
+  ansible.builtin.include_tasks: server-join.yml
+  tags: cluster
+  when:
+    - k3s_node_role == 'control-plane'
+    - not k3s_is_init_host | bool
+
+- name: "ALL | Join the worker nodes to the cluster"
+  ansible.builtin.include_tasks: agent-join.yml
+  tags: cluster
+  when: k3s_node_role == 'worker'
+
+- name: "ALL | Install a kubeconfig for the administrative user"
+  ansible.builtin.include_tasks: kubeconfig.yml
+  tags: kubeconfig
+  when: k3s_node_role == 'control-plane'
+
+- name: "ALL | Tighten the permissions on the Kubernetes credentials and data"
+  ansible.builtin.include_tasks: hardening-files.yml
+  tags: hardening
+  when:
+    - k3s_hardening_enabled | bool
+    - k3s_file_permissions_hardening | bool
+
+- name: "ALL | Install Helm on the control-plane nodes"
+  ansible.builtin.include_tasks: helm.yml
+  tags: helm
+  when:
+    - k3s_helm_enabled | bool
+    - k3s_node_role == 'control-plane'
+
+- name: "ALL | Configure the cluster storage classes"
+  ansible.builtin.include_tasks: storage.yml
+  tags: storage
+  when:
+    - k3s_storage_enabled | bool
+    - k3s_is_init_host | bool
+
+- name: "ALL | Install MetalLB and publish its address pools"
+  ansible.builtin.include_tasks: metallb.yml
+  tags: metallb
+  when:
+    - k3s_metallb_enabled | bool
+    - k3s_is_init_host | bool
+
+- name: "ALL | Install the Traefik ingress controller"
+  ansible.builtin.include_tasks: traefik.yml
+  tags: traefik
+  when:
+    - k3s_traefik_enabled | bool
+    - k3s_is_init_host | bool
+
+- name: "ALL | Install cert-manager and its ClusterIssuers"
+  ansible.builtin.include_tasks: cert-manager.yml
+  tags: cert-manager
+  when:
+    - k3s_cert_manager_enabled | bool
+    - k3s_is_init_host | bool
+
+- name: "ALL | Apply the cluster-level NetworkPolicies"
+  ansible.builtin.include_tasks: network-policies.yml
+  tags: network-policies
+  when:
+    - k3s_network_policy_enabled | bool
+    - k3s_is_init_host | bool
+    - k3s_network_policy_namespaces | length > 0
+
+- name: "ALL | Configure the scheduled etcd snapshots"
+  ansible.builtin.include_tasks: etcd-backup.yml
+  tags: etcd-backup
+  when:
+    - k3s_etcd_backup_enabled | bool
+    - k3s_node_role == 'control-plane'
+
+- name: "ALL | Verify the cluster is healthy and reachable"
+  ansible.builtin.include_tasks: validate.yml
+  tags: validate
+  when:
+    - k3s_validate_enabled | bool
+    - k3s_is_init_host | bool
+
+- name: "ALL | Print the cluster report"
+  ansible.builtin.include_tasks: report.yml
+  tags: report
+  when: k3s_is_init_host | bool
+
+# Opt-in twice over: this never runs in a normal play, only with --tags
+# upgrade, and only once k3s_upgrade_enabled has been set as well. The
+# one-node-at-a-time ordering is a play-level concern (serial: 1), which
+# upgrade.yml asserts is in place — see playbooks/upgrade.yml.
+- name: "ALL | Perform a controlled rolling upgrade of this node"
+  ansible.builtin.include_tasks: upgrade.yml
+  tags: [upgrade, never]

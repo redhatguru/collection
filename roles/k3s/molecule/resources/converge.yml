@@ -1,0 +1,15 @@
+---
+# Shared by all three cluster scenarios. What differs between them lives in
+# each scenario's molecule.yml — the boxes, the group membership and the test
+# subnet — which is the point: one role, one converge, three topologies.
+
+- name: Build the cluster
+  ansible.builtin.import_playbook: converge-cluster.yml
+
+- name: Deploy the example application onto the cluster
+  hosts: k8s_control_plane[0]
+
+  tasks:
+    - name: Include the k3s_app role
+      ansible.builtin.include_role:
+        name: k3s_app

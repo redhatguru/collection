@@ -1,0 +1,150 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# The security context, the resource limits and the service-account token are
+# all set from secure defaults that an application definition can override
+# field by field (they are merged, not replaced). What comes out satisfies the
+# "restricted" Pod Security Standard, so an application that leaves them alone
+# needs no exemption anywhere in the cluster.
+apiVersion: apps/v1
+kind: {{ k3s_app_item.kind | default('Deployment') }}
+metadata:
+  name: "{{ k3s_app_item.name }}"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/managed-by: ansible
+{% for key, value in (k3s_app_item.labels | default({})).items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+spec:
+  replicas: {{ k3s_app_item.replicas | default(1) | int }}
+{% if (k3s_app_item.kind | default('Deployment')) == 'StatefulSet' %}
+  serviceName: "{{ k3s_app_item.name }}"
+  podManagementPolicy: "{{ k3s_app_item.pod_management_policy | default('OrderedReady') }}"
+{% endif %}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+      app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+        app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+{% for key, value in (k3s_app_item.pod_labels | default({})).items() %}
+        {{ key }}: "{{ value }}"
+{% endfor %}
+{% if (k3s_app_item.pod_annotations | default({})) | length > 0 %}
+      annotations:
+{% for key, value in k3s_app_item.pod_annotations.items() %}
+        {{ key }}: "{{ value }}"
+{% endfor %}
+{% endif %}
+    spec:
+      serviceAccountName: "{{ k3s_app_item.service_account.name | default(k3s_app_item.name) }}"
+      automountServiceAccountToken: {{ k3s_app_item.service_account.automount
+        | default(k3s_app_default_automount_service_account_token) | bool | lower }}
+      securityContext:
+{{ k3s_app_default_pod_security_context
+   | combine(k3s_app_item.pod_security_context | default({}), recursive=True)
+   | to_nice_yaml(indent=2) | trim | indent(8, true) }}
+{% if (k3s_app_item.node_selector | default({})) | length > 0 %}
+      nodeSelector:
+{{ k3s_app_item.node_selector | to_nice_yaml(indent=2) | trim | indent(8, true) }}
+{% endif %}
+{% if (k3s_app_item.tolerations | default([])) | length > 0 %}
+      tolerations:
+{{ k3s_app_item.tolerations | to_nice_yaml(indent=2) | trim | indent(8, true) }}
+{% endif %}
+{% if (k3s_app_item.affinity | default({})) | length > 0 %}
+      affinity:
+{{ k3s_app_item.affinity | to_nice_yaml(indent=2) | trim | indent(8, true) }}
+{% endif %}
+{% if (k3s_app_item.topology_spread_constraints | default([])) | length > 0 %}
+      topologySpreadConstraints:
+{{ k3s_app_item.topology_spread_constraints | to_nice_yaml(indent=2) | trim | indent(8, true) }}
+{% endif %}
+      containers:
+        - name: "{{ k3s_app_item.name }}"
+{% if k3s_app_item.image.digest is defined %}
+          image: "{{ k3s_app_item.image.repository }}@{{ k3s_app_item.image.digest }}"
+{% else %}
+          image: "{{ k3s_app_item.image.repository }}:{{ k3s_app_item.image.tag }}"
+{% endif %}
+          imagePullPolicy: "{{ k3s_app_item.image.pull_policy | default('IfNotPresent') }}"
+{% if (k3s_app_item.command | default([])) | length > 0 %}
+          command:
+{{ k3s_app_item.command | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if (k3s_app_item.args | default([])) | length > 0 %}
+          args:
+{{ k3s_app_item.args | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if (k3s_app_item.env | default([])) | length > 0 %}
+          env:
+{{ k3s_app_item.env | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if (k3s_app_item.env_from | default([])) | length > 0 %}
+          envFrom:
+{{ k3s_app_item.env_from | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if (k3s_app_item.ports | default([])) | length > 0 %}
+          ports:
+{% for port in k3s_app_item.ports %}
+            - name: "{{ port.name | default('http') }}"
+              containerPort: {{ port.container_port | int }}
+              protocol: "{{ port.protocol | default('TCP') }}"
+{% endfor %}
+{% endif %}
+          resources:
+{{ k3s_app_default_resources
+   | combine(k3s_app_item.resources | default({}), recursive=True)
+   | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+          securityContext:
+{{ k3s_app_default_security_context
+   | combine(k3s_app_item.security_context | default({}), recursive=True)
+   | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% if k3s_app_item.readiness_probe is defined %}
+          readinessProbe:
+{{ k3s_app_item.readiness_probe | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if k3s_app_item.liveness_probe is defined %}
+          livenessProbe:
+{{ k3s_app_item.liveness_probe | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if k3s_app_item.startup_probe is defined %}
+          startupProbe:
+{{ k3s_app_item.startup_probe | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if (k3s_app_item.volume_mounts | default([])) | length > 0 %}
+          volumeMounts:
+{{ k3s_app_item.volume_mounts | to_nice_yaml(indent=2) | trim | indent(12, true) }}
+{% endif %}
+{% if (k3s_app_item.extra_containers | default([])) | length > 0 %}
+{{ k3s_app_item.extra_containers | to_nice_yaml(indent=2) | indent(8, true) }}
+{% endif %}
+{% if (k3s_app_item.volumes | default([])) | length > 0 %}
+      volumes:
+{{ k3s_app_item.volumes | to_nice_yaml(indent=2) | trim | indent(8, true) }}
+{% endif %}
+{% if (k3s_app_item.kind | default('Deployment')) == 'StatefulSet'
+      and (k3s_app_item.volume_claim_templates | default([])) | length > 0 %}
+  volumeClaimTemplates:
+{% for claim in k3s_app_item.volume_claim_templates %}
+    - metadata:
+        name: "{{ claim.name }}"
+      spec:
+        accessModes:
+{% for mode in claim.access_modes | default(['ReadWriteOnce']) %}
+          - "{{ mode }}"
+{% endfor %}
+{% if claim.storage_class is defined %}
+        storageClassName: "{{ claim.storage_class }}"
+{% endif %}
+        resources:
+          requests:
+            storage: "{{ claim.size }}"
+{% endfor %}
+{% endif %}

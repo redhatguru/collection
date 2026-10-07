@@ -1,0 +1,60 @@
+---
+# Downloads the K3s binary for the resolved release and verifies it against the
+# SHA-256 checksum that release publishes, then installs it. A no-op when the
+# requested release is already in place, which is what makes both a re-run and
+# an upgrade idempotent.
+
+- name: "ALL | Check which K3s version is installed on this node"
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", --version]
+  register: k3s_version_output
+  changed_when: false
+  failed_when: false
+
+- name: "ALL | Determine whether the installed K3s binary is the requested release"
+  ansible.builtin.set_fact:
+    k3s_installed_release: >-
+      {{ (k3s_version_output.stdout | default('')
+          | regex_search('k3s version (v[0-9.]+\+k3s[0-9]+)', '\1') | first | default('')) }}
+
+- name: "ALL | Fetch the checksums published with this K3s release"
+  ansible.builtin.uri:
+    url: "{{ k3s_release_url }}/{{ k3s_release | urlencode }}/{{ k3s_checksum_asset }}"
+    return_content: true
+  register: k3s_checksum_response
+  changed_when: false
+  when: k3s_installed_release != k3s_release
+
+- name: "ALL | Extract the checksum of the K3s binary for this architecture"
+  ansible.builtin.set_fact:
+    k3s_binary_checksum: >-
+      {{ k3s_checksum_response.content
+         | regex_findall('^([0-9a-f]{64})\s+' ~ k3s_binary_asset ~ '$', multiline=True)
+         | first | default('') }}
+  when: k3s_installed_release != k3s_release
+
+- name: "ALL | Ensure a checksum was actually published for this binary"
+  ansible.builtin.assert:
+    that:
+      - k3s_binary_checksum is match('^[0-9a-f]{64}$')
+    fail_msg: >-
+      No SHA-256 checksum for '{{ k3s_binary_asset }}' was found in
+      {{ k3s_checksum_asset }} of release
+      {{ k3s_release }}. The role will not install an unverified
+      binary — check that the release exists and publishes an asset for
+      {{ ansible_facts['architecture'] }}.
+    quiet: true
+  when: k3s_installed_release != k3s_release
+
+- name: "ALL | Install the verified K3s binary"
+  ansible.builtin.get_url:
+    url: "{{ k3s_release_url }}/{{ k3s_release | urlencode }}/{{ k3s_binary_asset }}"
+    dest: "{{ k3s_binary }}"
+    checksum: "sha256:{{ k3s_binary_checksum }}"
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  register: k3s_binary_installed
+  notify: "restart k3s"
+  when: k3s_installed_release != k3s_release

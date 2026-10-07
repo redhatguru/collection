@@ -1,0 +1,84 @@
+---
+# Shared test configuration, loaded by each scenario's molecule.yml. Addresses
+# are per-scenario and come from k3s_test_subnet_prefix.
+
+# Resolved from the stable channel at run time, so the test tracks the release
+# a new deployment would actually get.
+k3s_version: ""
+k3s_channel: "stable"
+
+# Fixed so the test covers the vaulted-token path rather than the generated
+# one. A real deployment keeps this in Ansible Vault.
+k3s_token: "molecule-test-token-not-a-real-secret-0123456789"
+
+# Vagrant boxes are smaller than a real node.
+k3s_preflight_min_cpu: 2
+k3s_preflight_min_memory_mb: 1024
+k3s_preflight_min_disk_free_mb: 4096
+
+# The firewall stays on throughout the test — that is a large part of what
+# these scenarios exist to prove.
+k3s_firewall_enabled: true
+k3s_hardening_enabled: true
+
+k3s_metallb_enabled: true
+k3s_metallb_address_pools:
+  - name: default
+    addresses:
+      - "{{ k3s_test_subnet_prefix }}.100-{{ k3s_test_subnet_prefix }}.110"
+
+k3s_traefik_enabled: true
+k3s_traefik_loadbalancer_ip: "{{ k3s_test_subnet_prefix }}.100"
+
+k3s_validate_ingress_hosts:
+  - host: hello.example.local
+    path: /
+
+# --------------------------------------------------------------------------
+# The application the scenario deploys and then verifies end to end
+# --------------------------------------------------------------------------
+
+k3s_app_applications:
+  - name: hello
+    namespace: hello
+    enabled: true
+    kind: Deployment
+    replicas: 1
+
+    image:
+      repository: nginxinc/nginx-unprivileged
+      tag: "1.27-alpine"
+
+    ports:
+      - name: http
+        container_port: 8080
+
+    service:
+      type: ClusterIP
+      port: 80
+      target_port: http
+
+    ingress:
+      enabled: true
+      host: hello.example.local
+      tls: false
+
+    volumes:
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+    volume_mounts:
+      - name: cache
+        mountPath: /var/cache/nginx
+      - name: run
+        mountPath: /tmp
+
+    readiness_probe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 3
+
+    network_policy:
+      enabled: true

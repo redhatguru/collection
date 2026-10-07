@@ -1,2 +1,8 @@
 ---
-collections: []
+collections:
+  # ansible.posix  — firewalld, sysctl, mount
+  # community.general — ufw, random_string lookup
+  # kubernetes.core  — helm (Helm releases for MetalLB/Traefik/cert-manager)
+  - name: ansible.posix
+  - name: community.general
+  - name: kubernetes.core

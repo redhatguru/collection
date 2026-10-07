@@ -1,0 +1,157 @@
+---
+- name: Verify the deployed applications
+  hosts: all
+  gather_facts: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+  tasks:
+    - name: Collect every object the role should have created
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - "{{ item.kind }}"
+          - "{{ item.name }}"
+          - -n
+          - "{{ item.namespace }}"
+          - -o
+          - "jsonpath={.metadata.name}"
+      become: true
+      register: k3s_app_test_objects
+      changed_when: false
+      failed_when: false
+      loop:
+        - {kind: namespace, name: app-web, namespace: default}
+        - {kind: deployment, name: web, namespace: app-web}
+        - {kind: service, name: web, namespace: app-web}
+        - {kind: ingress, name: web, namespace: app-web}
+        - {kind: configmap, name: web-content, namespace: app-web}
+        - {kind: secret, name: web-credentials, namespace: app-web}
+        - {kind: serviceaccount, name: web, namespace: app-web}
+        - {kind: networkpolicy, name: web-default-deny, namespace: app-web}
+        - {kind: networkpolicy, name: web-allow-dns, namespace: app-web}
+        - {kind: networkpolicy, name: web-allow-ingress, namespace: app-web}
+        - {kind: networkpolicy, name: web-allow-from-web, namespace: app-web}
+        - {kind: statefulset, name: store, namespace: app-store}
+        - {kind: pvc, name: data-store-0, namespace: app-store}
+      loop_control:
+        label: "{{ item.namespace }}/{{ item.kind }}/{{ item.name }}"
+
+    - name: Assert every expected object exists
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+        fail_msg: "{{ item.item.namespace }}/{{ item.item.kind }}/{{ item.item.name }} is missing"
+      loop: "{{ k3s_app_test_objects.results }}"
+      loop_control:
+        label: "{{ item.item.namespace }}/{{ item.item.kind }}/{{ item.item.name }}"
+
+    - name: Check that the disabled application was never created
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, get, namespace, app-never]
+      become: true
+      register: k3s_app_test_disabled
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the disabled application has no namespace
+      ansible.builtin.assert:
+        that:
+          - k3s_app_test_disabled.rc != 0
+        fail_msg: "The namespace of a disabled application was created anyway"
+
+    - name: Check the Pod Security label on an application namespace
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - namespace
+          - app-web
+          - -o
+          - "jsonpath={.metadata.labels.pod-security\\.kubernetes\\.io/enforce}"
+      become: true
+      register: k3s_app_test_psa
+      changed_when: false
+
+    - name: Assert the application namespace enforces the restricted standard
+      ansible.builtin.assert:
+        that:
+          - k3s_app_test_psa.stdout == 'restricted'
+        fail_msg: "app-web enforces '{{ k3s_app_test_psa.stdout }}', expected 'restricted'"
+
+    - name: Check that the Deployment's pods are actually running
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - deployment
+          - web
+          - -n
+          - app-web
+          - -o
+          - "jsonpath={.status.readyReplicas}"
+      become: true
+      register: k3s_app_test_ready
+      changed_when: false
+      retries: 30
+      delay: 10
+      until: k3s_app_test_ready.stdout | default('0') == '2'
+
+    - name: Fetch the application through the ingress by hostname
+      ansible.builtin.uri:
+        url: "http://{{ k3s_test_subnet_prefix }}.100/"
+        headers:
+          Host: web.example.local
+        return_content: true
+        status_code: [200]
+      register: k3s_app_test_response
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: k3s_app_test_response.status | default(0) == 200
+
+    - name: Assert the ConfigMap-provided page is what the ingress served
+      ansible.builtin.assert:
+        that:
+          - "'molecule web' in k3s_app_test_response.content"
+        fail_msg: "The ingress served something other than the ConfigMap content"
+
+    - name: Remove one application again with state=absent
+      ansible.builtin.include_role:
+        name: k3s_app
+      vars:
+        k3s_app_state: absent
+        k3s_app_wait: false
+        k3s_app_applications:
+          - name: store
+            namespace: app-store
+            enabled: true
+            kind: StatefulSet
+            image:
+              repository: nginxinc/nginx-unprivileged
+              tag: "1.27-alpine"
+            service:
+              port: 80
+            network_policy:
+              enabled: true
+
+    - name: Check that the removed application's workload is gone
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, kubectl, get, statefulset, store, -n, app-store]
+      become: true
+      register: k3s_app_test_removed
+      changed_when: false
+      failed_when: false
+      retries: 12
+      delay: 5
+      until: k3s_app_test_removed.rc != 0
+
+    - name: Assert state=absent removed the workload
+      ansible.builtin.assert:
+        that:
+          - k3s_app_test_removed.rc != 0
+        fail_msg: "The StatefulSet survived state=absent"

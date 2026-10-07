@@ -1,0 +1,163 @@
+---
+# Same model as the firewalld path: the firewall stays enabled, pod and service
+# traffic is permitted by trusting its CIDRs, and node-to-node control traffic
+# gets explicit per-port rules based on this node's role.
+#
+# ufw's default forward policy is DROP, which silently breaks the pod network,
+# so the routed rules below are not optional. They are scoped to the pod and
+# service CIDRs rather than set as a blanket "default allow routed".
+#
+# See vars/main.yml for the full port matrix and what each port is for.
+
+- name: "DEBIAN | Ensure ufw is installed"
+  ansible.builtin.package:
+    name: "{{ k3s_firewall_package }}"
+    state: present
+  become: true
+
+# Deliberately the first rule written, and written before ufw is enabled
+# further down, so enabling the firewall can never drop the SSH session this
+# play is running over.
+- name: "DEBIAN | Allow SSH so the firewall can never lock this node out"
+  community.general.ufw:
+    rule: allow
+    port: "{{ k3s_firewall_ssh_port | string }}"
+    proto: tcp
+  become: true
+  when: k3s_firewall_ssh_sources | length == 0
+
+- name: "DEBIAN | Allow SSH from the management networks only"
+  community.general.ufw:
+    rule: allow
+    port: "{{ k3s_firewall_ssh_port | string }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+  become: true
+  loop: "{{ k3s_firewall_ssh_sources }}"
+
+- name: "DEBIAN | Allow traffic from the pod and service networks to this node"
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ item }}"
+  become: true
+  loop: "{{ k3s_firewall_trusted_networks }}"
+
+- name: "DEBIAN | Allow the pod and service networks to be routed through this node"
+  community.general.ufw:
+    rule: allow
+    route: true
+    from_ip: "{{ item }}"
+  become: true
+  loop: "{{ k3s_firewall_trusted_networks }}"
+
+- name: "DEBIAN | Allow traffic routed back towards the pod and service networks"
+  community.general.ufw:
+    rule: allow
+    route: true
+    to_ip: "{{ item }}"
+  become: true
+  loop: "{{ k3s_firewall_trusted_networks }}"
+
+- name: "DEBIAN | Allow the cluster-internal TCP ports from the other cluster nodes"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0 }}"
+    proto: tcp
+    from_ip: "{{ item.1 }}"
+  become: true
+  loop: "{{ k3s_firewall_cluster_tcp_ports | product(k3s_firewall_node_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/tcp from {{ item.1 }}"
+
+- name: "DEBIAN | Allow the cluster-internal UDP ports from the other cluster nodes"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0 }}"
+    proto: udp
+    from_ip: "{{ item.1 }}"
+  become: true
+  loop: "{{ k3s_firewall_cluster_udp_ports | product(k3s_firewall_node_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/udp from {{ item.1 }}"
+
+- name: "DEBIAN | Allow the Kubernetes API from anywhere for kubectl users"
+  community.general.ufw:
+    rule: allow
+    port: "{{ k3s_api_port | string }}"
+    proto: tcp
+  become: true
+  when:
+    - k3s_node_role == 'control-plane'
+    - k3s_firewall_api_sources | length == 0
+
+- name: "DEBIAN | Allow the Kubernetes API from the management networks only"
+  community.general.ufw:
+    rule: allow
+    port: "{{ k3s_api_port | string }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+  become: true
+  loop: "{{ k3s_firewall_api_sources }}"
+  when: k3s_node_role == 'control-plane'
+
+# MetalLB announces the ingress address from one node at a time and that node
+# can be any of them, so every node needs the ingress ports open.
+- name: "DEBIAN | Allow the ingress ports from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  become: true
+  loop: "{{ k3s_firewall_ingress_ports }}"
+  when:
+    - k3s_traefik_enabled | bool
+    - k3s_firewall_ingress_sources | length == 0
+
+- name: "DEBIAN | Allow the ingress ports from the permitted networks only"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0 | string }}"
+    proto: tcp
+    from_ip: "{{ item.1 }}"
+  become: true
+  loop: "{{ k3s_firewall_ingress_ports | product(k3s_firewall_ingress_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/tcp from {{ item.1 }}"
+  when: k3s_traefik_enabled | bool
+
+- name: "DEBIAN | Allow the NodePort range"
+  community.general.ufw:
+    rule: allow
+    port: "{{ k3s_firewall_nodeport_range | replace('-', ':') }}"
+    proto: tcp
+  become: true
+  when: k3s_firewall_nodeport_enabled | bool
+
+- name: "DEBIAN | Allow the extra TCP ports this deployment asks for"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  become: true
+  loop: "{{ k3s_firewall_extra_tcp_ports }}"
+
+- name: "DEBIAN | Allow the extra UDP ports this deployment asks for"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: udp
+  become: true
+  loop: "{{ k3s_firewall_extra_udp_ports }}"
+
+- name: "DEBIAN | Ensure unsolicited incoming traffic is denied by default"
+  community.general.ufw:
+    default: deny
+    direction: incoming
+  become: true
+  when: k3s_firewall_manage_state | bool
+
+- name: "DEBIAN | Ensure ufw is enabled"
+  community.general.ufw:
+    state: enabled
+  become: true
+  when: k3s_firewall_manage_state | bool

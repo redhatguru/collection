@@ -1,4 +1,534 @@
 ---
 # defaults file for k3s
-k3s_version: v1.28.6+k3s2
-k3s_kubernetes_version: v1.30
+#
+# Everything in here is meant to be overridden from inventory, group_vars or
+# host_vars. Values the role derives itself (topology, port lists, package
+# names) live in vars/ instead and are deliberately not overridable.
+
+# --------------------------------------------------------------------------
+# Inventory contract and cluster topology
+# --------------------------------------------------------------------------
+
+# Inventory group names the topology is derived from. The role looks at no
+# other groups, so an existing inventory only has to map onto these two.
+k3s_control_plane_group: "k8s_control_plane"
+k3s_worker_group: "k8s_workers"
+
+# Host that bootstraps the cluster (the one that runs with cluster-init) and
+# that every cluster-wide API call is delegated to. Defaults to the first
+# control-plane host in inventory order, which is stable as long as the
+# inventory is — pin it explicitly if you reorder groups.
+k3s_init_host: "{{ k3s_control_plane_hosts | first | default('') }}"
+
+# A control-plane node listed as a worker as well is treated as a topology
+# mistake unless this is set: it puts unprivileged workloads next to etcd.
+k3s_allow_control_plane_as_worker: false
+
+# Taint control-plane nodes with CriticalAddonsOnly=true:NoExecute so only
+# cluster add-ons schedule there. Only useful once dedicated workers exist;
+# the role adds the matching tolerations to MetalLB, Traefik and cert-manager
+# so enabling this cannot strand the add-ons.
+k3s_taint_control_plane: false
+
+# --------------------------------------------------------------------------
+# Node identity
+# --------------------------------------------------------------------------
+
+# Name this node registers in the cluster under.
+k3s_node_name: "{{ ansible_facts['hostname'] }}"
+
+# Address this node advertises and is reached on by the rest of the cluster.
+# The default-route address is right for a single-NIC server; override it per
+# host when cluster traffic must use a different interface than the default
+# route.
+k3s_node_ip: "{{ ansible_facts['default_ipv4']['address'] | default('') }}"
+
+# Publicly reachable address, when it differs from k3s_node_ip (NAT).
+k3s_node_external_ip: ""
+
+# Address other nodes register against. Defaults to the bootstrap node, which
+# makes it a single point of failure *for joining new nodes only* — running
+# nodes keep working without it. Point this at a VIP or external load
+# balancer in front of all control-plane nodes for a fully HA endpoint.
+k3s_api_registration_address: >-
+  {{ hostvars[k3s_init_host]['k3s_node_ip'] | default('') }}
+k3s_api_port: 6443
+
+# Extra names/addresses to add to the API server certificate. The role always
+# adds every control-plane node name and IP plus the registration address.
+k3s_api_extra_tls_san: []
+
+# --------------------------------------------------------------------------
+# K3s release
+# --------------------------------------------------------------------------
+
+# Exact K3s release to install, e.g. "v1.31.5+k3s1". Left empty, the role
+# resolves k3s_channel against the official channel server at run
+# time. Pin this for production: an empty value means two runs weeks apart can
+# install different versions.
+k3s_version: ""
+k3s_channel: "stable"
+k3s_channel_url: "https://update.k3s.io/v1-release/channels"
+
+# Official release artefacts. The binary is downloaded and verified against
+# the release sha256sum file; the install script only wires up the systemd
+# unit (INSTALL_K3S_SKIP_DOWNLOAD=true), so nothing is ever piped into a shell.
+k3s_release_url: "https://github.com/k3s-io/k3s/releases/download"
+k3s_install_script_url: "https://get.k3s.io"
+k3s_bin_dir: "/usr/local/bin"
+
+# --------------------------------------------------------------------------
+# K3s cluster configuration (rendered into /etc/rancher/k3s/config.yaml)
+# --------------------------------------------------------------------------
+
+# Use embedded etcd rather than sqlite, even for a single node. Costs a little
+# disk I/O and buys etcd snapshots plus the ability to grow into an HA control
+# plane later without re-bootstrapping the cluster.
+k3s_cluster_init: true
+
+# Shared cluster secret. Leave empty and the role prefers, in order: the token
+# of an already-bootstrapped cluster, then this value, then a freshly
+# generated one. Supply it from Ansible Vault for a reproducible build — never
+# in plain text. It is written to a root-only file and referenced as
+# token-file, so it never lands in config.yaml.
+k3s_token: ""
+k3s_token_file: "/etc/rancher/k3s/token"
+
+k3s_data_dir: "/var/lib/rancher/k3s"
+k3s_config_dir: "/etc/rancher/k3s"
+
+# kubeconfig written on every server. 0600 keeps the cluster-admin credential
+# root-only; the role can additionally install a copy for one user (see
+# k3s_kubeconfig_user below) rather than making it world-readable.
+k3s_write_kubeconfig_mode: "0600"
+
+k3s_cluster_cidr: "10.42.0.0/16"
+k3s_service_cidr: "10.43.0.0/16"
+k3s_cluster_dns: "10.43.0.10"
+k3s_cluster_domain: "cluster.local"
+
+# vxlan (default), host-gw, wireguard-native, or none when you bring your own
+# CNI. wireguard-native encrypts pod traffic between nodes at the cost of
+# throughput; the firewall rules follow this setting automatically.
+k3s_flannel_backend: "vxlan"
+
+# K3s' own NetworkPolicy controller. Leave enabled — it is what makes the
+# NetworkPolicies this role and roles/k3s_app write actually enforce.
+k3s_network_policy_controller_enabled: true
+
+# Bundled components. The packaged Traefik is always disabled: it is deployed
+# through K3s' HelmChart addon, which cannot be version-pinned or made HA the
+# way the upstream chart can, so this role installs Traefik with Helm instead.
+k3s_servicelb_enabled: false
+k3s_metrics_server_enabled: true
+k3s_storage_local_path_enabled: true
+
+# Extra components to pass to K3s' `disable:` list, e.g. ["coredns"].
+k3s_disable_extra: []
+
+# Raw escape hatch merged last into config.yaml, for options this role does
+# not model (embedded registry mirror, etcd S3 snapshots, extra kubelet args).
+k3s_extra_config: {}
+
+# Extra arguments appended to the ones the role builds itself.
+k3s_extra_server_args: []
+k3s_extra_agent_args: []
+k3s_extra_kubelet_args: []
+k3s_extra_apiserver_args: []
+
+# --------------------------------------------------------------------------
+# kubeconfig distribution
+# --------------------------------------------------------------------------
+
+# User on the control-plane nodes that gets ~/.kube/config (0600, with the
+# server URL rewritten from 127.0.0.1 to the registration address). Set to ""
+# to skip and use `sudo k3s kubectl` only.
+k3s_kubeconfig_user: "{{ ansible_facts['user_id'] | default('root') }}"
+k3s_kubeconfig_mode: "0600"
+
+# Fetch the kubeconfig back to the Ansible controller. Off by default: it
+# copies a cluster-admin credential onto another machine.
+k3s_kubeconfig_fetch: false
+k3s_kubeconfig_fetch_path: ""
+
+# --------------------------------------------------------------------------
+# OS preparation
+# --------------------------------------------------------------------------
+
+k3s_os_prepare_enabled: true
+
+# Set the system hostname to k3s_node_name. A no-op by default, since
+# that variable defaults to the hostname the host already has.
+k3s_manage_hostname: true
+
+# Maintain a marked block in /etc/hosts with every cluster node, so nodes can
+# resolve each other without depending on external DNS.
+k3s_manage_etc_hosts: true
+
+# Install and enable chrony, then require the clock to be in sync. etcd and
+# TLS certificate validation both break on skewed clocks.
+k3s_manage_time_sync: true
+k3s_require_time_sync: true
+
+k3s_kernel_modules:
+  - overlay
+  - br_netfilter
+
+# Only what Kubernetes actually needs: pod routing, bridged traffic visible to
+# netfilter, and inotify headroom (a busy node runs out of the default 128
+# instances long before it runs out of anything else).
+k3s_sysctl_settings:
+  net.ipv4.ip_forward: "1"
+  net.bridge.bridge-nf-call-iptables: "1"
+  net.bridge.bridge-nf-call-ip6tables: "1"
+  fs.inotify.max_user_instances: "1024"
+  fs.inotify.max_user_watches: "524288"
+
+# Extra nofile/nproc limits, as a list of /etc/security/limits.d entries:
+#   - {domain: "*", limit_type: "soft", limit_item: "nofile", value: "65536"}
+# Usually unnecessary — K3s' systemd unit already raises its own limits.
+k3s_os_limits: []
+
+# --------------------------------------------------------------------------
+# Firewall
+# --------------------------------------------------------------------------
+
+# The host firewall stays enabled. Pod and service traffic is allowed by
+# trusting those CIDRs (and the CNI interfaces) rather than by switching the
+# firewall off.
+k3s_firewall_enabled: true
+
+# "firewalld", "ufw" or "" to pick the native backend for the OS family.
+k3s_firewall_backend: ""
+
+# Let the role install and enable the firewall when it is not running yet.
+# SSH is always allowed before the firewall is enabled.
+k3s_firewall_manage_state: true
+
+# firewalld zone to add the rules to. Empty means the system's default zone.
+k3s_firewall_zone: ""
+
+k3s_firewall_ssh_port: 22
+# Empty means any source. Narrow this to your management network.
+k3s_firewall_ssh_sources: []
+
+# Who may reach the Kubernetes API (6443/tcp). Empty means any source — set
+# this to your management network for a meaningful reduction in exposure.
+k3s_firewall_api_sources: []
+
+# Who may reach Traefik's HTTP/HTTPS ports. Empty means any source, which is
+# usually what you want for an ingress.
+k3s_firewall_ingress_sources: []
+k3s_firewall_ingress_ports:
+  - 80
+  - 443
+
+# Extra sources to treat as cluster-internal, on top of the cluster node
+# addresses and the pod/service CIDRs the role derives.
+k3s_firewall_cluster_sources_extra: []
+
+k3s_firewall_extra_tcp_ports: []
+k3s_firewall_extra_udp_ports: []
+
+# NodePort range. Off by default — with MetalLB and Traefik in place there is
+# no reason to expose 30000-32767 on every node.
+k3s_firewall_nodeport_enabled: false
+k3s_firewall_nodeport_range: "30000-32767"
+
+# --------------------------------------------------------------------------
+# Hardening
+# --------------------------------------------------------------------------
+
+k3s_hardening_enabled: true
+
+k3s_disable_swap: true
+
+# Stop and mask services that have no business running on a Kubernetes node
+# and that actively break it (see vars/<os_family>.yml for the list — on RHEL
+# that is nm-cloud-setup, which rewrites routes out from under the CNI).
+k3s_disable_unused_services: true
+
+k3s_sysctl_hardening_enabled: true
+# Deliberately conservative: no rp_filter changes, because strict reverse-path
+# filtering interacts badly with overlay networking and the gain over a
+# firewall that is already on is small.
+k3s_sysctl_hardening_settings:
+  net.ipv4.conf.all.accept_redirects: "0"
+  net.ipv4.conf.all.send_redirects: "0"
+  net.ipv4.conf.default.accept_redirects: "0"
+  net.ipv4.conf.default.send_redirects: "0"
+  net.ipv4.conf.all.accept_source_route: "0"
+  net.ipv4.conf.all.log_martians: "1"
+  net.ipv4.tcp_syncookies: "1"
+  net.ipv6.conf.all.accept_redirects: "0"
+  net.ipv6.conf.all.accept_source_route: "0"
+
+# Tighten ownership/permissions on the K3s configuration, credential and data
+# directories (CIS Kubernetes Benchmark 1.1.x equivalents for K3s).
+k3s_file_permissions_hardening: true
+
+# Encrypt Secrets at rest in etcd.
+k3s_secrets_encryption_enabled: true
+
+# Make the kubelet refuse to start rather than silently rewrite kernel
+# parameters. Requires the four sysctls in k3s_protect_kernel_sysctls,
+# which the role sets in the same step — never enable one without the other.
+k3s_protect_kernel_defaults: true
+k3s_protect_kernel_sysctls:
+  vm.panic_on_oom: "0"
+  vm.overcommit_memory: "1"
+  kernel.panic: "10"
+  kernel.panic_on_oops: "1"
+
+# API server audit logging.
+k3s_api_audit_enabled: true
+k3s_audit_log_max_age: 30
+k3s_audit_log_max_backup: 10
+k3s_audit_log_max_size: 100
+# Metadata for most requests, request bodies for the things that matter, and
+# nothing at all for the high-volume read noise that would drown the log.
+k3s_audit_policy_rules: []
+
+# Pod Security Admission. The cluster-wide default enforces "baseline", which
+# blocks privileged containers, hostPID/hostIPC, host ports and dangerous
+# capabilities while leaving CNI and load-balancer components working.
+# "restricted" is enforced per namespace instead (roles/k3s_app labels
+# application namespaces) — enforcing it cluster-wide would break MetalLB's
+# speaker, which legitimately needs hostNetwork and NET_RAW.
+k3s_pod_security_enabled: true
+k3s_pod_security_enforce: "baseline"
+k3s_pod_security_audit: "restricted"
+k3s_pod_security_warn: "restricted"
+k3s_pod_security_exempt_namespaces:
+  - kube-system
+  - kube-node-lease
+  - kube-public
+
+# --------------------------------------------------------------------------
+# Cluster-level NetworkPolicies managed by this role
+# --------------------------------------------------------------------------
+
+# Namespaces to lock down with a default-deny policy plus the allow-rules that
+# keep them functional (DNS egress, ingress from Traefik). Application
+# namespaces are handled by roles/k3s_app instead; kube-system is never
+# touched, because a default-deny there takes the cluster down.
+k3s_network_policy_enabled: true
+k3s_network_policy_namespaces: []
+
+# Namespace the ingress controller runs in, allowed to reach the pods in the
+# namespaces above. Everything else is denied, including traffic from other
+# application namespaces.
+k3s_network_policy_ingress_namespace: "{{ k3s_traefik_namespace }}"
+
+# Let pods reach the Kubernetes API. Needed by anything that uses its service
+# account — operators, controllers, leader election — and the first thing to
+# miss when a default-deny policy is applied without it.
+k3s_network_policy_allow_api_server: true
+
+# --------------------------------------------------------------------------
+# Helm
+# --------------------------------------------------------------------------
+
+# Helm is installed on the control-plane nodes (verified tarball from the
+# official release server, no install script). Empty version resolves to the
+# latest release at run time; pin it for production.
+k3s_helm_enabled: true
+k3s_helm_version: ""
+k3s_helm_release_url: "https://get.helm.sh"
+k3s_helm_latest_version_url: "https://get.helm.sh/helm-latest-version"
+k3s_helm_bin_dir: "/usr/local/bin"
+
+# --------------------------------------------------------------------------
+# MetalLB
+# --------------------------------------------------------------------------
+
+k3s_metallb_enabled: true
+k3s_metallb_namespace: "metallb-system"
+k3s_metallb_chart_repo_name: "metallb"
+k3s_metallb_chart_repo_url: "https://metallb.github.io/metallb"
+k3s_metallb_chart_ref: "metallb/metallb"
+# Empty installs the newest chart in the repo; pin for reproducibility.
+k3s_metallb_chart_version: ""
+
+# "layer2" or "bgp". layer2 needs nothing from the network: one node answers
+# ARP for the service address and the others take over if it fails. That is
+# highly available but not load balanced — all ingress traffic enters through
+# a single node at a time.
+k3s_metallb_mode: "layer2"
+
+# Addresses MetalLB may hand out. Must be free addresses on the nodes' own L2
+# segment, outside the DHCP range. There is no sane default for this, so
+# preflight refuses to continue while it is empty and MetalLB is enabled.
+k3s_metallb_address_pools: []
+
+# BGP peers, only used when k3s_metallb_mode is "bgp". Each entry maps
+# straight onto a MetalLB BGPPeer spec, e.g.
+#   - {name: core, peer_asn: 64512, my_asn: 64513, peer_address: 10.10.0.1}
+k3s_metallb_bgp_peers: []
+
+k3s_metallb_extra_values: {}
+
+# --------------------------------------------------------------------------
+# Traefik (ingress controller)
+# --------------------------------------------------------------------------
+
+k3s_traefik_enabled: true
+k3s_traefik_namespace: "traefik"
+k3s_traefik_chart_repo_name: "traefik"
+k3s_traefik_chart_repo_url: "https://traefik.github.io/charts"
+k3s_traefik_chart_ref: "traefik/traefik"
+k3s_traefik_chart_version: ""
+
+k3s_traefik_ingress_class: "traefik"
+k3s_traefik_ingress_class_is_default: true
+
+# Empty means "as many replicas as there are schedulable nodes, capped at 3",
+# which collapses to 1 on a single node without any extra configuration.
+k3s_traefik_replicas: ""
+k3s_traefik_max_replicas: 3
+
+# Spread replicas across nodes and keep at least one available during drains.
+# A PodDisruptionBudget is only created when there is more than one replica —
+# a budget of 1/1 would block every node drain, including upgrades.
+k3s_traefik_pod_anti_affinity: true
+k3s_traefik_topology_spread: true
+k3s_traefik_pdb_min_available: 1
+
+# The shared ingress address every application hostname points at (DNS model
+# B). Empty lets MetalLB pick the first free address from the pool; setting it
+# explicitly is strongly recommended, because DNS records point here.
+k3s_traefik_loadbalancer_ip: ""
+k3s_traefik_address_pool: ""
+
+# "Cluster" sends traffic to any Traefik pod, at the cost of hiding the client
+# IP behind SNAT. "Local" preserves the client IP but only works while a
+# Traefik pod runs on the node MetalLB currently announces from, so it can
+# blackhole traffic — see docs/architecture.md before changing this.
+k3s_traefik_external_traffic_policy: "Cluster"
+
+k3s_traefik_http_redirect_enabled: true
+k3s_traefik_tls_min_version: "VersionTLS12"
+# Default certificate for hosts without their own TLS secret. Empty means
+# Traefik's built-in self-signed certificate.
+k3s_traefik_default_tls_secret: ""
+
+k3s_traefik_dashboard_enabled: false
+k3s_traefik_metrics_enabled: false
+k3s_traefik_log_level: "INFO"
+k3s_traefik_access_log_enabled: false
+
+k3s_traefik_resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "1000m"
+    memory: "512Mi"
+
+k3s_traefik_extra_values: {}
+
+# --------------------------------------------------------------------------
+# cert-manager
+# --------------------------------------------------------------------------
+
+k3s_cert_manager_enabled: false
+k3s_cert_manager_namespace: "cert-manager"
+k3s_cert_manager_chart_repo_name: "jetstack"
+k3s_cert_manager_chart_repo_url: "https://charts.jetstack.io"
+k3s_cert_manager_chart_ref: "jetstack/cert-manager"
+k3s_cert_manager_chart_version: ""
+k3s_cert_manager_extra_values: {}
+
+# ClusterIssuers to create. Each entry has a name and a type:
+#   - {name: selfsigned, type: selfsigned}
+#   - {name: internal-ca, type: ca, ca_common_name: "Lab Root CA",
+#      ca_duration: "87600h"}
+#   - {name: letsencrypt, type: acme, acme_email: me@example.com,
+#      acme_server: production|staging, solver: http01}
+# Anything cert-manager supports that this model does not cover (DNS-01 with a
+# specific provider, external issuers) goes in
+# k3s_cert_manager_raw_issuers as a literal manifest.
+k3s_cert_manager_issuers: []
+k3s_cert_manager_raw_issuers: []
+k3s_cert_manager_acme_servers:
+  production: "https://acme-v02.api.letsencrypt.org/directory"
+  staging: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+# --------------------------------------------------------------------------
+# Storage
+# --------------------------------------------------------------------------
+
+k3s_storage_enabled: true
+
+# Path K3s' bundled local-path provisioner stores volumes under. Node-local
+# storage: a pod that moves to another node does not find its data. Fine for a
+# single node, not real HA storage — see docs/architecture.md.
+k3s_storage_local_path: "/var/lib/rancher/k3s/storage"
+
+# Extra StorageClasses, as declarative entries:
+#   - name: nfs
+#     provisioner: nfs.csi.k8s.io
+#     is_default: true
+#     reclaim_policy: Delete
+#     volume_binding_mode: Immediate
+#     allow_volume_expansion: true
+#     parameters: {server: 10.10.0.5, share: /export/k8s}
+k3s_storage_extra_classes: []
+
+# --------------------------------------------------------------------------
+# etcd snapshots
+# --------------------------------------------------------------------------
+
+# K3s takes the snapshots itself; this only configures it. Requires embedded
+# etcd (k3s_cluster_init), since sqlite has no snapshot support.
+k3s_etcd_backup_enabled: true
+k3s_etcd_backup_schedule: "0 */12 * * *"
+k3s_etcd_backup_retention: 10
+k3s_etcd_backup_dir: "/var/lib/rancher/k3s/server/db/snapshots"
+
+# --------------------------------------------------------------------------
+# Upgrades
+# --------------------------------------------------------------------------
+
+# Upgrades never run as part of a normal play: they need both the "upgrade"
+# tag and this flag. One node at a time, control plane first, with a health
+# gate in between — see docs/architecture.md.
+k3s_upgrade_enabled: false
+k3s_upgrade_drain_enabled: true
+k3s_upgrade_drain_timeout: 300
+k3s_upgrade_snapshot_before: true
+
+# --------------------------------------------------------------------------
+# Preflight checks
+# --------------------------------------------------------------------------
+
+k3s_preflight_enabled: true
+k3s_preflight_min_cpu: 2
+k3s_preflight_min_memory_mb: 1536
+k3s_preflight_min_disk_free_mb: 10240
+k3s_preflight_disk_path: "/var"
+k3s_preflight_check_node_connectivity: true
+
+# --------------------------------------------------------------------------
+# Post-install validation
+# --------------------------------------------------------------------------
+
+k3s_validate_enabled: true
+
+# Hostnames to check end to end through the ingress, as:
+#   - {host: app1.example.local, path: /, status: [200, 404]}
+# Checked over HTTP against the ingress address with a Host header, which
+# proves routing without having to turn off certificate verification.
+k3s_validate_ingress_hosts: []
+
+# --------------------------------------------------------------------------
+# General
+# --------------------------------------------------------------------------
+
+# Seconds to wait for readiness (API server, Helm releases, node Ready,
+# drains). Generous, because slow disks make etcd slow to settle.
+k3s_wait_timeout: 600
+
+# Print the extra diagnostic output (full node/pod/service listings) in the
+# report. Off by default to keep playbook output readable.
+k3s_debug: false

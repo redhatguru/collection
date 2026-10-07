@@ -1,0 +1,87 @@
+---
+# kubernetes.core.k8s drives the Kubernetes API through the Python client, so
+# the client has to be present on whichever host runs these tasks. The role
+# installs it rather than listing it as a prerequisite and failing later with
+# an import error nobody can act on.
+#
+# Distribution package first, pip only if that produced nothing — which is the
+# case on RHEL and Rocky Linux without EPEL.
+
+- name: "ALL | Check whether the Python Kubernetes client is already installed"
+  ansible.builtin.command:
+    argv: [python3, -c, "import kubernetes"]
+  register: k3s_app_client_check
+  changed_when: false
+  failed_when: false
+
+- name: "DEBIAN | Install the Python Kubernetes client from the distribution packages"
+  ansible.builtin.apt:
+    name: "{{ k3s_app_python_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  failed_when: false
+  when:
+    - k3s_app_client_check.rc != 0
+    - ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Install the Python Kubernetes client from the distribution packages"
+  ansible.builtin.dnf:
+    name: "{{ k3s_app_python_packages }}"
+    state: present
+  become: true
+  failed_when: false
+  when:
+    - k3s_app_client_check.rc != 0
+    - ansible_facts['os_family'] == 'RedHat'
+
+- name: "ALL | Check again whether the distribution packages provided the client"
+  ansible.builtin.command:
+    argv: [python3, -c, "import kubernetes"]
+  register: k3s_app_client_recheck
+  changed_when: false
+  failed_when: false
+  when: k3s_app_client_check.rc != 0
+
+- name: "ALL | Determine whether the pip fallback is needed"
+  ansible.builtin.set_fact:
+    k3s_app_pip_needed: >-
+      {{ k3s_app_pip_fallback_enabled | bool
+         and k3s_app_client_check.rc != 0
+         and (k3s_app_client_recheck.rc | default(1)) != 0 }}
+
+- name: "ALL | Ensure pip is available for the fallback install"
+  ansible.builtin.package:
+    name: "{{ k3s_app_pip_package }}"
+    state: present
+  become: true
+  when: k3s_app_pip_needed | bool
+
+- name: "ALL | Install the Python Kubernetes client with pip as a fallback"
+  ansible.builtin.pip:
+    name: "{{ k3s_app_pip_packages }}"
+    state: present
+    extra_args: "{{ k3s_app_pip_extra_args | default(omit, true) }}"
+  become: true
+  when: k3s_app_pip_needed | bool
+
+- name: "ALL | Confirm the Python Kubernetes client can now be imported"
+  ansible.builtin.command:
+    argv: [python3, -c, "import kubernetes"]
+  register: k3s_app_client_final
+  changed_when: false
+  failed_when: false
+
+- name: "ALL | Ensure a missing Kubernetes client stops the run with a clear reason"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_client_final.rc == 0
+    fail_msg: >-
+      The Python Kubernetes client could not be installed on
+      {{ inventory_hostname }}, so kubernetes.core.k8s cannot talk to the
+      cluster. On RHEL-family hosts python3-kubernetes lives in EPEL — enable
+      it, or install the client yourself and set
+      k3s_app_manage_python_dependencies to false. Last error:
+      {{ k3s_app_client_final.stderr | default('') | trim }}
+    quiet: true

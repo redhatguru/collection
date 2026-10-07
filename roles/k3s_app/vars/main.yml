@@ -1,0 +1,16 @@
+---
+# vars file for k3s_app
+
+# Applications with enabled explicitly set to false are skipped entirely
+# rather than removed, so disabling one is not a silent delete.
+k3s_app_enabled_applications: >-
+  {{ k3s_app_applications | selectattr('enabled', 'defined') | selectattr('enabled') | list
+     + k3s_app_applications | rejectattr('enabled', 'defined') | list }}
+
+# A Deployment reports readiness through an Available condition. A StatefulSet
+# has no equivalent condition, so no wait_condition is passed for it and the
+# module falls back to its own readiness check on the replica counts.
+k3s_app_wait_conditions:
+  Deployment:
+    type: Available
+    status: "True"

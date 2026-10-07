@@ -1,0 +1,100 @@
+---
+# Scenario 3: three-node HA control plane plus a dedicated worker, on Rocky
+# Linux 9.
+#
+# The same role and the same converge playbook as the single-node scenarios —
+# only the inventory differs, which is the whole claim this scenario exists to
+# check. Three control-plane nodes give the embedded etcd a quorum, and Traefik
+# ends up with three replicas spread over separate nodes.
+#
+# Needs roughly 11 GB of free memory on the VirtualBox host.
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  parallel: false
+  provider:
+    name: virtualbox
+platforms:
+  - name: k8s-ha-01
+    box: bento/rockylinux-9
+    memory: 3072
+    cpus: 2
+    groups:
+      - k8s_control_plane
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.23.11
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: k8s-ha-02
+    box: bento/rockylinux-9
+    memory: 3072
+    cpus: 2
+    groups:
+      - k8s_control_plane
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.23.12
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: k8s-ha-03
+    box: bento/rockylinux-9
+    memory: 3072
+    cpus: 2
+    groups:
+      - k8s_control_plane
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.23.13
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: k8s-ha-04
+    box: bento/rockylinux-9
+    memory: 2048
+    cpus: 2
+    groups:
+      - k8s_workers
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.23.14
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "../../.."
+  playbooks:
+    prepare: ../resources/prepare.yml
+    converge: ../resources/converge.yml
+    verify: ../resources/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
+    host_vars:
+      k8s-ha-01:
+        k3s_test_subnet_prefix: "10.10.23"
+      k8s-ha-02:
+        k3s_test_subnet_prefix: "10.10.23"
+      k8s-ha-03:
+        k3s_test_subnet_prefix: "10.10.23"
+      k8s-ha-04:
+        k3s_test_subnet_prefix: "10.10.23"
+        # A worker runs no etcd and no API server.
+        k3s_preflight_min_memory_mb: 900
+verifier:
+  name: ansible
+ansible:
+  cfg:
+    ssh_connection:
+      retries: 5
+    defaults:
+      timeout: 60

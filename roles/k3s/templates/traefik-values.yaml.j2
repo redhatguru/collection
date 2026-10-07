@@ -1,0 +1,164 @@
+---
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+#
+# Replica count, anti-affinity and the PodDisruptionBudget are all derived from
+# the cluster topology, so a single-node cluster collapses to one replica with
+# no budget (a 1-of-1 budget would block every node drain, upgrades included)
+# while a multi-node cluster spreads Traefik over as many nodes as it has.
+
+deployment:
+  enabled: true
+  kind: Deployment
+  replicas: {{ k3s_traefik_replica_count | int }}
+
+{% if (k3s_traefik_replica_count | int) > 1 %}
+podDisruptionBudget:
+  enabled: true
+  minAvailable: {{ k3s_traefik_pdb_min_available | int }}
+{% else %}
+podDisruptionBudget:
+  enabled: false
+{% endif %}
+
+{% if k3s_traefik_pod_anti_affinity | bool and (k3s_traefik_replica_count | int) > 1 %}
+affinity:
+  podAntiAffinity:
+    # Preferred rather than required: with more replicas than nodes, a required
+    # rule would leave the surplus pods permanently Pending.
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+{% endif %}
+
+{% if k3s_traefik_topology_spread | bool and (k3s_traefik_replica_count | int) > 1 %}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+{% endif %}
+
+{% if k3s_taint_control_plane | bool %}
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+    effect: NoExecute
+{% endif %}
+
+service:
+  enabled: true
+  type: LoadBalancer
+  annotations:
+{% if k3s_traefik_loadbalancer_ip | length > 0 %}
+    metallb.universe.tf/loadBalancerIPs: "{{ k3s_traefik_loadbalancer_ip }}"
+{% endif %}
+{% if k3s_traefik_address_pool | length > 0 %}
+    metallb.universe.tf/address-pool: "{{ k3s_traefik_address_pool }}"
+{% endif %}
+  spec:
+    # "Cluster" hides the client address behind SNAT but always reaches a
+    # Traefik pod. "Local" preserves the client address and only works while a
+    # pod runs on the node MetalLB currently announces from — see
+    # docs/architecture.md before switching.
+    externalTrafficPolicy: "{{ k3s_traefik_external_traffic_policy }}"
+
+ingressClass:
+  enabled: true
+  isDefaultClass: {{ k3s_traefik_ingress_class_is_default | bool | lower }}
+  name: "{{ k3s_traefik_ingress_class }}"
+
+ports:
+  web:
+    port: 8000
+    exposedPort: 80
+    expose:
+      default: true
+    protocol: TCP
+{% if k3s_traefik_http_redirect_enabled | bool %}
+    redirections:
+      entryPoint:
+        to: websecure
+        scheme: https
+        permanent: true
+{% endif %}
+  websecure:
+    port: 8443
+    exposedPort: 443
+    expose:
+      default: true
+    protocol: TCP
+    tls:
+      enabled: true
+  traefik:
+    # The internal entry point stays cluster-local; it is never published
+    # through the LoadBalancer service.
+    expose:
+      default: false
+
+tlsOptions:
+  default:
+    minVersion: "{{ k3s_traefik_tls_min_version }}"
+    sniStrict: false
+{% if k3s_traefik_default_tls_secret | length > 0 %}
+
+tlsStore:
+  default:
+    defaultCertificate:
+      secretName: "{{ k3s_traefik_default_tls_secret }}"
+{% endif %}
+
+api:
+  dashboard: {{ k3s_traefik_dashboard_enabled | bool | lower }}
+  # Never exposes the API without authentication, regardless of the dashboard.
+  insecure: false
+
+providers:
+  kubernetesCRD:
+    enabled: true
+    # Keeps an IngressRoute in one namespace from pointing at a Service in
+    # another, which would let a tenant borrow someone else's backend.
+    allowCrossNamespace: false
+    allowExternalNameServices: false
+  kubernetesIngress:
+    enabled: true
+    allowExternalNameServices: false
+    # Publishes the LoadBalancer address into the status of every Ingress, so
+    # `kubectl get ingress` shows where a hostname has to point.
+    publishedService:
+      enabled: true
+
+# Empty on purpose: the chart's defaults here phone home for version checks
+# and anonymous usage statistics.
+globalArguments: []
+
+logs:
+  general:
+    level: "{{ k3s_traefik_log_level }}"
+  access:
+    enabled: {{ k3s_traefik_access_log_enabled | bool | lower }}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+{{ k3s_traefik_resources | to_nice_yaml(indent=2) | trim | indent(2, true) }}
+{% if k3s_traefik_extra_values | length > 0 %}
+
+{{ k3s_traefik_extra_values | to_nice_yaml(indent=2) | trim }}
+{% endif %}

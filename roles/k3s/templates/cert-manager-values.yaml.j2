@@ -1,0 +1,41 @@
+---
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+crds:
+  # Installed by the chart so the CRDs are upgraded along with it, instead of
+  # drifting behind a separately applied manifest.
+  enabled: true
+  keep: true
+
+{% if k3s_taint_control_plane | bool %}
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+    effect: NoExecute
+webhook:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoExecute
+cainjector:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoExecute
+startupapicheck:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoExecute
+{% endif %}
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "64Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+{% if k3s_cert_manager_extra_values | length > 0 %}
+
+{{ k3s_cert_manager_extra_values | to_nice_yaml(indent=2) | trim }}
+{% endif %}

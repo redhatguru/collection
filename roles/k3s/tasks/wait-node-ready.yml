@@ -1,0 +1,22 @@
+---
+# Asked from the bootstrap node rather than locally, because that is the only
+# node guaranteed to have a kubeconfig at this point in the run.
+- name: "ALL | Wait for this node to be registered and Ready in the cluster"
+  ansible.builtin.command:
+    argv:
+      - "{{ k3s_binary }}"
+      - kubectl
+      - get
+      - node
+      - "{{ k3s_node_name }}"
+      - -o
+      - 'jsonpath={.status.conditions[?(@.type=="Ready")].status}'
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  delegate_to: "{{ k3s_init_host }}"
+  register: k3s_node_ready_state
+  changed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 10) | round | int }}"
+  delay: 10
+  until: k3s_node_ready_state.stdout | default('') == 'True'

@@ -1,2 +1,33 @@
 ---
-# handlers file for k3s
+# Restarted one node at a time: the K3s unit is Type=notify, so systemd only
+# reports the restart complete once the API server signals readiness. On an HA
+# control plane that keeps the etcd quorum intact through a configuration
+# change instead of taking every member down at once.
+- name: "ALL | Restart the K3s service"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    state: restarted
+  become: true
+  throttle: 1
+  when: k3s_service_pre_existing | default(false) | bool
+  listen: "restart k3s"
+
+- name: "ALL | Reload firewalld so the permanent rules take effect"
+  ansible.builtin.command:
+    argv: [firewall-cmd, --reload]
+  become: true
+  changed_when: true
+  listen: "reload firewalld"
+
+- name: "ALL | Reload the systemd-managed hostname consumers"
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  listen: "reload systemd"
+
+- name: "RHEL | Reload NetworkManager so it stops managing the CNI interfaces"
+  ansible.builtin.systemd_service:
+    name: NetworkManager
+    state: reloaded
+  become: true
+  listen: "reload networkmanager"

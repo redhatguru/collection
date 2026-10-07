@@ -1,0 +1,50 @@
+---
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+crds:
+  enabled: true
+
+controller:
+  enabled: true
+{% if k3s_taint_control_plane | bool %}
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoExecute
+{% endif %}
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+
+speaker:
+  enabled: true
+  # The speaker needs hostNetwork and NET_RAW to answer ARP for the service
+  # addresses, which is why its namespace is exempt from the cluster-wide
+  # "baseline" Pod Security Standard (see vars/main.yml).
+{% if k3s_taint_control_plane | bool %}
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoExecute
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+{% endif %}
+  frr:
+    # Layer 2 and MetalLB's native BGP speaker both work without FRR; FRR is
+    # only needed for BFD and for multi-protocol BGP.
+    enabled: false
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+{% if k3s_metallb_extra_values | length > 0 %}
+
+{{ k3s_metallb_extra_values | to_nice_yaml(indent=2) | trim }}
+{% endif %}
