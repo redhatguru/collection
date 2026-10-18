@@ -1,0 +1,193 @@
+---
+# Proves the instance is actually working, rather than that the tasks that
+# built it reported success. Runs at the end of a normal play and again at the
+# end of an upgrade, which is the run where it matters most: a GitLab upgrade
+# can install cleanly and still leave Puma refusing connections or migrations
+# half applied.
+#
+# Read-only throughout. The HTTP checks go over the loopback interface with a
+# Host header, so they do not depend on DNS or on the certificate matching the
+# address dialled.
+
+- name: "ALL | Collect the state of every GitLab service"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_ctl_command }}", status]
+  become: true
+  register: gitlab_validate_services
+  changed_when: false
+  failed_when: false
+  retries: "{{ gitlab_validate_retries | int }}"
+  delay: "{{ gitlab_validate_delay | int }}"
+  until:
+    - gitlab_validate_services.stdout_lines | default([]) | length > 0
+    - gitlab_validate_services.stdout_lines | default([]) | select('match', '^down:') | list | length == 0
+  when: gitlab_validate_check_services | bool
+
+- name: "ALL | Ensure no GitLab service is down"
+  ansible.builtin.assert:
+    that:
+      - gitlab_validate_services.stdout_lines | default([]) | length > 0
+      - gitlab_validate_services.stdout_lines | select('match', '^down:') | list | length == 0
+    fail_msg: >-
+      These GitLab services are not running:
+      {{ gitlab_validate_services.stdout_lines | default([]) | select('match', '^down:') | join(' | ') }}.
+      Look at `sudo gitlab-ctl tail <service>` for the reason — on a host at
+      the edge of its memory this is usually Puma or Sidekiq being killed by
+      the OOM reaper.
+    quiet: true
+  when: gitlab_validate_check_services | bool
+
+- name: "ALL | Read the GitLab version that is actually running"
+  ansible.builtin.slurp:
+    src: "{{ gitlab_version_file }}"
+  become: true
+  register: gitlab_validate_version_file
+  when: gitlab_validate_check_version | bool
+
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+  when: gitlab_validate_check_version | bool
+
+- name: "ALL | Determine which release is installed and which one is running"
+  ansible.builtin.set_fact:
+    gitlab_running_version: "{{ gitlab_validate_version_file.content | b64decode | trim }}"
+    gitlab_installed_version: >-
+      {{ ((ansible_facts['packages'][gitlab_package_name] | default([]) | first | default({})).version | default(''))
+         | regex_replace('-(ce|ee)\.[0-9]+$', '') }}
+  when: gitlab_validate_check_version | bool
+
+# The expected version is the installed package's, not gitlab_version: that is
+# what catches the failure mode this check exists for — a package that was
+# replaced while the reconfigure that applies it never finished, leaving the
+# previous application still serving. tasks/upgrade.yml separately asserts
+# that the installed package is the one that was asked for.
+- name: "ALL | Ensure the running GitLab is the release that is installed"
+  ansible.builtin.assert:
+    that:
+      - gitlab_running_version | length > 0
+      - gitlab_running_version == gitlab_installed_version
+    fail_msg: >-
+      {{ gitlab_package_name }} {{ gitlab_installed_version }} is installed but
+      the application serving requests reports
+      {{ gitlab_running_version | default('nothing') }}. The package was
+      replaced without a completed `gitlab-ctl reconfigure`; run
+      `sudo gitlab-ctl reconfigure` and read its output.
+    quiet: true
+  when: gitlab_validate_check_version | bool
+
+- name: "ALL | Check that GitLab answers on the port clients use"
+  ansible.builtin.uri:
+    url: "{{ gitlab_local_scheme }}://127.0.0.1:{{ gitlab_local_port | trim }}{{ item.path }}"
+    headers:
+      Host: "{{ gitlab_external_url_host }}"
+    status_code: "{{ item.status }}"
+    validate_certs: "{{ gitlab_validate_http_validate_certs | bool }}"
+    return_content: "{{ item.return_content | default(false) }}"
+    timeout: 30
+  register: gitlab_validate_endpoints
+  changed_when: false
+  retries: "{{ gitlab_validate_retries | int }}"
+  delay: "{{ gitlab_validate_delay | int }}"
+  until: gitlab_validate_endpoints is not failed
+  loop:
+    # Puma is up and the database and Redis answer. Readiness is the one that
+    # distinguishes "nginx is listening" from "GitLab works".
+    - path: "/-/liveness"
+      status: [200]
+    - path: "/-/readiness"
+      status: [200]
+    # The sign-in page is rendered by Rails, so this covers the asset
+    # pipeline and the session store an upgrade can break on its own.
+    - path: "/users/sign_in"
+      status: [200]
+      return_content: true
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - gitlab_validate_check_http | bool
+    - gitlab_nginx_enabled | bool
+
+- name: "ALL | Ensure the page GitLab served really is GitLab"
+  ansible.builtin.assert:
+    that:
+      - (gitlab_validate_endpoints.results | last).content is search('GitLab')
+    fail_msg: >-
+      {{ gitlab_external_url }}/users/sign_in answered, but the page it
+      returned is not GitLab's sign-in page. Something else is listening on
+      {{ gitlab_local_scheme }}://127.0.0.1:{{ gitlab_local_port | trim }}.
+    quiet: true
+  when:
+    - gitlab_validate_check_http | bool
+    - gitlab_nginx_enabled | bool
+
+# Reconfigure runs the migrations, so a pending one means the reconfigure was
+# interrupted — and GitLab in that state fails in ways that look like
+# application bugs.
+- name: "ALL | Check that no database migration is still pending"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_rake_command }}", "db:abort_if_pending_migrations"]
+  become: true
+  register: gitlab_validate_migrations
+  changed_when: false
+  failed_when: false
+  when: gitlab_validate_check_migrations | bool
+
+- name: "ALL | Ensure the database schema is up to date"
+  ansible.builtin.assert:
+    that:
+      - gitlab_validate_migrations.rc == 0
+    fail_msg: >-
+      GitLab has pending database migrations:
+      {{ gitlab_validate_migrations.stdout_lines | default([]) | join(' ') }}
+      {{ gitlab_validate_migrations.stderr_lines | default([]) | join(' ') }}
+      Finish them with `sudo gitlab-ctl reconfigure`.
+    quiet: true
+  when: gitlab_validate_check_migrations | bool
+
+- name: "ALL | Ensure the GitLab configuration and secrets are readable by root only"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  become: true
+  register: gitlab_validate_credential_files
+  loop:
+    - "{{ gitlab_config_file }}"
+    - "{{ gitlab_secrets_file }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: "ALL | Ensure nothing but root can read the GitLab credentials"
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.mode == '0600'
+      - item.stat.pw_name == 'root'
+    fail_msg: >-
+      {{ item.item }} is
+      {{ item.stat.mode | default('missing') }} owned by
+      {{ item.stat.pw_name | default('nobody') }}, expected 0600 owned by
+      root. gitlab.rb holds the credentials this role renders into it and
+      gitlab-secrets.json is the key to everything encrypted in the database.
+    quiet: true
+  loop: "{{ gitlab_validate_credential_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "ALL | Run GitLab's own self-check"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_rake_command }}", "gitlab:check", "SANITIZE=true"]
+  become: true
+  register: gitlab_validate_self_check
+  changed_when: false
+  failed_when: false
+  when: gitlab_validate_run_gitlab_check | bool
+
+- name: "ALL | Ensure GitLab's own self-check found nothing broken"
+  ansible.builtin.assert:
+    that:
+      - gitlab_validate_self_check.rc == 0
+    fail_msg: >-
+      `gitlab-rake gitlab:check` failed:
+      {{ gitlab_validate_self_check.stdout_lines | default([]) | select('search', '(?i)(no|fail|error)') | join(' / ') }}
+    quiet: true
+  when: gitlab_validate_run_gitlab_check | bool

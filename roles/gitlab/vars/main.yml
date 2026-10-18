@@ -1,0 +1,190 @@
+---
+# vars file for gitlab
+#
+# Values the role derives rather than accepts. These sit in vars/ on purpose:
+# the paths below are decided by the Omnibus package, not by us, and the
+# parsed external URL has to stay in step with gitlab_external_url — letting
+# either be overridden separately would mean the preflight checks pass while
+# GitLab is configured from something else.
+
+# --------------------------------------------------------------------------
+# Supported platforms
+# --------------------------------------------------------------------------
+
+gitlab_supported_os_families:
+  - Debian
+
+gitlab_supported_distributions:
+  - Ubuntu
+
+# Ubuntu releases the Omnibus repository publishes packages for, newest last.
+# focal is deliberately absent: packages.gitlab.com still serves it, but the
+# newest release published there is 18.11.x, so an instance on 20.04 cannot be
+# upgraded any further without moving the host to a newer Ubuntu first.
+gitlab_supported_ubuntu_releases:
+  - jammy
+  - noble
+  - resolute
+
+gitlab_supported_architectures:
+  - x86_64
+  - aarch64
+
+# --------------------------------------------------------------------------
+# Package and repository
+# --------------------------------------------------------------------------
+
+gitlab_package_name: "gitlab-{{ gitlab_edition }}"
+
+# apt reads an ASCII-armoured key straight from signed-by as long as the file
+# is named .asc, so the key never has to be dearmoured into a binary keyring
+# and no key ever lands in the deprecated global trust store.
+gitlab_apt_keyring_dir: "/etc/apt/keyrings"
+gitlab_apt_keyring_file: "{{ gitlab_apt_keyring_dir }}/gitlab-{{ gitlab_edition }}.asc"
+gitlab_apt_repository_filename: "gitlab-{{ gitlab_edition }}"
+
+# Ansible's architecture fact mapped onto the name the repository publishes
+# packages under.
+gitlab_repository_architecture: "{{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else 'arm64' }}"
+
+# Packages the Omnibus install assumes are already there: it does not pull in
+# an SSH daemon, a CA bundle or the timezone data it needs.
+gitlab_os_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - openssh-server
+  - perl
+  - tzdata
+
+# --------------------------------------------------------------------------
+# Paths the Omnibus package owns
+# --------------------------------------------------------------------------
+
+gitlab_config_dir: "/etc/gitlab"
+gitlab_config_file: "{{ gitlab_config_dir }}/gitlab.rb"
+gitlab_secrets_file: "{{ gitlab_config_dir }}/gitlab-secrets.json"
+
+# Its presence stops the package's post-install script from running
+# `gitlab-ctl reconfigure` on its own. With it in place a reconfigure only
+# ever happens where this role asks for one, which is what makes an upgrade
+# predictable: package first, then backup-safe reconfigure, then validation.
+gitlab_skip_auto_reconfigure_file: "{{ gitlab_config_dir }}/skip-auto-reconfigure"
+
+gitlab_ctl_command: "/usr/bin/gitlab-ctl"
+gitlab_rake_command: "/usr/bin/gitlab-rake"
+gitlab_backup_command: "/usr/bin/gitlab-backup"
+
+# Written by the package and updated by every upgrade, so it is the one place
+# that reports the version actually running rather than the one installed.
+gitlab_version_file: "/opt/gitlab/embedded/service/gitlab-rails/VERSION"
+
+# Ruby syntax check run against the rendered gitlab.rb before it is applied:
+# a typo in an override is caught here instead of half way through a
+# reconfigure. Set to an empty string to skip it.
+gitlab_config_validate_command: "/opt/gitlab/embedded/bin/ruby -c %s"
+
+# --------------------------------------------------------------------------
+# The external URL, taken apart
+# --------------------------------------------------------------------------
+
+gitlab_external_url_scheme: "{{ gitlab_external_url | urlsplit('scheme') }}"
+gitlab_external_url_host: "{{ gitlab_external_url | urlsplit('hostname') }}"
+gitlab_external_url_is_https: "{{ (gitlab_external_url | urlsplit('scheme')) == 'https' }}"
+
+# The port GitLab is actually reachable on: whatever the URL names, else the
+# default for its scheme.
+gitlab_external_url_port: >-
+  {{ gitlab_external_url | urlsplit('port')
+     | default(443 if gitlab_external_url_is_https | bool else 80, true) }}
+
+# nginx terminates TLS when the external URL says https, unless told
+# otherwise because something in front of this host does it instead.
+gitlab_nginx_listen_https_effective: >-
+  {{ gitlab_nginx_listen_https if gitlab_nginx_listen_https | string | length > 0
+     else gitlab_external_url_is_https }}
+
+# --------------------------------------------------------------------------
+# TLS
+# --------------------------------------------------------------------------
+
+# Whether this instance serves TLS at all. Derived from the external URL (and
+# from gitlab_nginx_listen_https when something in front of this host
+# terminates TLS instead), so the certificate source below is consulted only
+# when there is actually a certificate to serve.
+gitlab_tls_enabled: "{{ gitlab_nginx_listen_https_effective }}"
+gitlab_tls_self_signed_in_use: >-
+  {{ gitlab_tls_enabled | bool and gitlab_tls_certificate_source == 'self-signed' }}
+
+# Named after the host so they land where GitLab itself looks for a
+# certificate, which keeps the two conventions in step.
+gitlab_tls_self_signed_certificate: "{{ gitlab_tls_self_signed_dir }}/{{ gitlab_external_url_host }}.crt"
+gitlab_tls_self_signed_key: "{{ gitlab_tls_self_signed_dir }}/{{ gitlab_external_url_host }}.key"
+gitlab_tls_self_signed_csr: "{{ gitlab_tls_self_signed_dir }}/{{ gitlab_external_url_host }}.csr"
+
+# A certificate for an IP address needs that address as an IP SAN; a name
+# needs it as a DNS SAN. Getting this wrong is the difference between a client
+# that warns once and a client that refuses the certificate outright.
+gitlab_tls_self_signed_subject_alt_name: >-
+  {{ [('IP:' ~ gitlab_external_url_host)
+      if gitlab_external_url_host is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+      else ('DNS:' ~ gitlab_external_url_host)]
+     + gitlab_tls_self_signed_extra_sans | default([]) | list }}
+
+# What nginx is pointed at, which depends on the source: the files the caller
+# manages, the pair the role generated, or — for Let's Encrypt — nothing,
+# because GitLab writes its own certificate where it already looks for one and
+# naming a file that does not exist yet would stop nginx from starting.
+# Empty over plain HTTP too, where there is no certificate to name at all.
+gitlab_nginx_ssl_certificate_effective: >-
+  {{ ''
+     if not gitlab_tls_enabled | bool
+     else (gitlab_tls_self_signed_certificate
+           if gitlab_tls_certificate_source == 'self-signed'
+           else (gitlab_nginx_ssl_certificate
+                 if gitlab_tls_certificate_source == 'file' else '')) }}
+gitlab_nginx_ssl_certificate_key_effective: >-
+  {{ ''
+     if not gitlab_tls_enabled | bool
+     else (gitlab_tls_self_signed_key
+           if gitlab_tls_certificate_source == 'self-signed'
+           else (gitlab_nginx_ssl_certificate_key
+                 if gitlab_tls_certificate_source == 'file' else '')) }}
+
+# Where GitLab's own nginx actually listens on this host, which is not always
+# what the external URL says: behind a load balancer that terminates TLS the
+# URL is https while GitLab itself serves plain HTTP on port 80. The
+# validation dials these rather than the external URL.
+gitlab_local_scheme: "{{ 'https' if gitlab_nginx_listen_https_effective | bool else 'http' }}"
+gitlab_local_port: >-
+  {{ gitlab_nginx_listen_port if gitlab_nginx_listen_port | string | length > 0
+     else (443 if gitlab_nginx_listen_https_effective | bool else 80) }}
+
+# --------------------------------------------------------------------------
+# The requested release, taken apart
+# --------------------------------------------------------------------------
+
+# "18.0.1-ce.0" -> "18.0.1". The package revision suffix is meaningless to a
+# version comparison and GitLab's own version file does not carry it.
+gitlab_version_number: "{{ gitlab_version | regex_replace('-(ce|ee)\\.[0-9]+$', '') }}"
+gitlab_version_major: "{{ gitlab_version_number | split('.') | first }}"
+gitlab_version_minor: "{{ (gitlab_version_number | split('.'))[1] | default('0') }}"
+
+# --------------------------------------------------------------------------
+# Backup invocation
+# --------------------------------------------------------------------------
+
+# gitlab-backup takes its options as rake-style arguments, not flags.
+gitlab_backup_skip_arguments: >-
+  {{ ['SKIP=' ~ (gitlab_backup_skip | join(','))] if gitlab_backup_skip | length > 0 else [] }}
+
+# CRON=1 silences the progress output, so the scheduled job only mails when
+# something went wrong. An on-demand backup keeps the output: that is where
+# the operator reads what was written.
+gitlab_backup_arguments: "{{ ['CRON=1'] + gitlab_backup_skip_arguments }}"
+
+# Human-readable form of the backup schedule, for the end-of-run report.
+gitlab_backup_schedule_description: >-
+  {{ [gitlab_backup_minute, gitlab_backup_hour, gitlab_backup_day,
+      gitlab_backup_month, gitlab_backup_weekday] | join(' ')
+     if gitlab_backup_schedule_enabled | bool else 'not scheduled' }}

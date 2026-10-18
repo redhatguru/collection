@@ -1,0 +1,22 @@
+---
+# /etc/gitlab/gitlab.rb is rendered from the role's variables and from nothing
+# else, so the instance's whole configuration is reviewable as a diff. A
+# change here notifies the reconfigure handler; a run that changes nothing
+# does not restart GitLab.
+
+- name: "ALL | Ensure the GitLab configuration matches the role's variables"
+  ansible.builtin.template:
+    src: gitlab.rb.j2
+    dest: "{{ gitlab_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+    # A typo in an override would otherwise surface half way through a
+    # reconfigure, with the previous configuration already torn down.
+    validate: "{{ gitlab_config_validate_command | default(omit, true) }}"
+  become: true
+  # The rendered file holds the initial root password and any SMTP, LDAP or
+  # database credentials, so the task reports that it changed without printing
+  # what changed.
+  diff: false
+  notify: "ALL | Reconfigure GitLab so the rendered configuration is applied"

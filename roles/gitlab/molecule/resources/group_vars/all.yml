@@ -1,0 +1,49 @@
+---
+# Shared test configuration, loaded by the scenario's molecule.yml.
+
+# Set here rather than left to the role's default because
+# resources/tasks/discover-releases.yml runs outside the role, where the
+# role's own defaults are not in scope, and it needs to know which package to
+# ask the repository about.
+gitlab_edition: "ce"
+
+# Resolved on the host from the packages the repository actually offers, so
+# the test never pins a release that has since been withdrawn — see
+# resources/tasks/discover-releases.yml. gitlab_version is set per play from them.
+gitlab_external_url: "http://gitlab.molecule.local"
+
+# Obviously not a secret: it is in a public repository. A real deployment
+# takes this from Ansible Vault.
+gitlab_initial_root_password: "MoleculeTestPassword123!"
+
+# Sized for a test VM rather than for an instance with users on it. The
+# bundled monitoring and the agent server are off because nothing in the test
+# reads them, and each one costs memory and reconfigure time.
+gitlab_puma_worker_processes: 2
+gitlab_puma_per_worker_max_memory_mb: 1200
+gitlab_sidekiq_max_concurrency: 5
+gitlab_postgresql_shared_buffers: "256MB"
+gitlab_prometheus_enabled: false
+gitlab_node_exporter_enabled: false
+gitlab_kas_enabled: false
+
+# Settings that exist only so verify.yml can prove the configuration really is
+# rendered from variables: each one is checked in the file on the host.
+gitlab_time_zone: "Europe/Amsterdam"
+gitlab_nginx_client_max_body_size: "512m"
+gitlab_rails_extra_configuration:
+  gitlab_default_theme: 2
+  gitlab_username_changing_enabled: false
+gitlab_extra_configuration: |
+  # Appended verbatim from gitlab_extra_configuration.
+  gitlab_rails['env'] = { "MOLECULE_TEST" => "true" }
+
+# The registry is not installed in this scenario, so there is nothing to back
+# up for it — and skipping a component is itself worth covering.
+gitlab_backup_skip:
+  - registry
+
+# A first reconfigure on a VM this size takes a while, and the upgrade's
+# migrations take longer.
+gitlab_validate_retries: 90
+gitlab_validate_delay: 10

@@ -1,0 +1,207 @@
+---
+# Moves a running GitLab to the release pinned in gitlab_version. Opt-in
+# twice over: the task in main.yml is tagged never, so this only runs with
+# --tags upgrade, and then only once gitlab_upgrade_enabled is true as well.
+# playbooks/gitlab-upgrade.yml does both.
+#
+# The order is the whole point of this file:
+#
+#   1. refuse an upgrade that GitLab's upgrade path does not allow;
+#   2. back the instance up — data and secrets — while it still works;
+#   3. replace the package;
+#   4. reconfigure, which is what runs the database migrations;
+#   5. restart, then verify the instance that comes back is the new release.
+#
+# Step 4 is not reversible. The backup from step 2 is the only way back, which
+# is why gitlab_upgrade_backup_before defaults to true and why this file
+# refuses to continue if the backup did not produce both archives.
+#
+# This file deliberately leaves gitlab.rb alone — an upgrade changes the
+# application, not the configuration. Apply configuration changes with
+# playbooks/gitlab.yml, before or after.
+
+- name: "ALL | Ensure the upgrade was asked for deliberately"
+  ansible.builtin.assert:
+    that:
+      - gitlab_upgrade_enabled | bool
+    fail_msg: >-
+      This play was run with --tags upgrade but gitlab_upgrade_enabled is
+      false. A GitLab upgrade runs database migrations that cannot be rolled
+      back, so it never happens as a side effect of a configuration run. Set
+      gitlab_upgrade_enabled to true once you have read the release notes for
+      the version you are moving to.
+    quiet: true
+
+- name: "ALL | Ensure the upgrade has a release to move to"
+  ansible.builtin.assert:
+    that:
+      - gitlab_version is match('^[0-9]+\.[0-9]+\.[0-9]+-' ~ gitlab_edition ~ '\.[0-9]+$')
+    fail_msg: >-
+      gitlab_version is '{{ gitlab_version }}'. An upgrade has to name the
+      release it targets, e.g. '19.5.0-{{ gitlab_edition }}.0' — "whatever the
+      repository calls newest today" is not something you can plan, test or
+      repeat on a second instance.
+    quiet: true
+
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: "ALL | Work out what is installed now and what this upgrade would change"
+  ansible.builtin.set_fact:
+    gitlab_upgrade_from: >-
+      {{ (ansible_facts['packages'][gitlab_package_name] | default([]) | first | default({})).version | default('') }}
+    gitlab_upgrade_from_number: >-
+      {{ ((ansible_facts['packages'][gitlab_package_name] | default([]) | first | default({})).version | default(''))
+         | regex_replace('-(ce|ee)\.[0-9]+$', '') }}
+
+- name: "ALL | Ensure there is a GitLab on this host to upgrade"
+  ansible.builtin.assert:
+    that:
+      - gitlab_upgrade_from | length > 0
+    fail_msg: >-
+      {{ gitlab_package_name }} is not installed on {{ inventory_hostname }},
+      so there is nothing to upgrade. Run playbooks/gitlab.yml to install it.
+    quiet: true
+
+- name: "ALL | Determine whether this host still has to be upgraded"
+  ansible.builtin.set_fact:
+    gitlab_upgrade_needed: "{{ gitlab_upgrade_from != gitlab_version }}"
+    gitlab_upgrade_from_major: "{{ gitlab_upgrade_from_number | split('.') | first | int }}"
+    gitlab_upgrade_from_minor: "{{ (gitlab_upgrade_from_number | split('.'))[1] | default(0) | int }}"
+
+- name: "ALL | Report that this host already runs the requested release"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} already runs {{ gitlab_package_name }}
+      {{ gitlab_version }}. Nothing to upgrade.
+  when: not gitlab_upgrade_needed | bool
+
+- name: "ALL | Ensure the upgrade is not a downgrade"
+  ansible.builtin.assert:
+    that:
+      - gitlab_version_number is version(gitlab_upgrade_from_number, '>')
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ gitlab_upgrade_from_number }} and
+      gitlab_version asks for {{ gitlab_version_number }}. GitLab cannot be
+      downgraded: the migrations the newer release ran have already changed
+      the database schema, and the older application cannot read it. Restore
+      the pre-upgrade backup instead.
+    quiet: true
+  when: gitlab_upgrade_needed | bool
+
+# GitLab's upgrade path has required stops: you move one minor release at a
+# time, and across a major boundary only from the last minor of the previous
+# major. Skipping one leaves migrations that never ran, which surfaces much
+# later as data that does not add up. The check below is the part that can be
+# decided from here — whether the jump is bigger than one minor — and the
+# stops within a major are in the documentation this points at.
+- name: "ALL | Ensure the upgrade follows GitLab's supported upgrade path"
+  ansible.builtin.assert:
+    that:
+      - gitlab_version_major | int == gitlab_upgrade_from_major | int
+      - (gitlab_version_minor | int - gitlab_upgrade_from_minor | int) <= 1
+    fail_msg: >-
+      Upgrading from {{ gitlab_upgrade_from_number }} to
+      {{ gitlab_version_number }} skips at least one stop on GitLab's upgrade
+      path. Upgrade one minor release at a time, and cross a major boundary
+      only from the last minor of the major you are on — check your jump
+      against <https://docs.gitlab.com/update/upgrade_paths/> and against the
+      upgrade path tool at <https://gitlab-com.gitlab.io/support/toolbox/upgrade-path/>.
+      Set gitlab_upgrade_allow_path_skip to true to override this once you
+      have confirmed the jump is supported.
+    quiet: true
+  when:
+    - gitlab_upgrade_needed | bool
+    - not gitlab_upgrade_allow_path_skip | bool
+
+- name: "ALL | Report what this upgrade is about to do"
+  ansible.builtin.debug:
+    msg: >-
+      Upgrading {{ inventory_hostname }} from {{ gitlab_upgrade_from }} to
+      {{ gitlab_version }}.
+      {{ 'A full backup is taken first.' if gitlab_upgrade_backup_before | bool
+         else 'No backup is taken first — gitlab_upgrade_backup_before is false.' }}
+      GitLab is unavailable from the moment the package is replaced until the
+      reconfigure and the migrations have finished.
+  when: gitlab_upgrade_needed | bool
+
+- name: "ALL | Back the instance up before replacing the package"
+  ansible.builtin.include_tasks: backup-create.yml
+  when:
+    - gitlab_upgrade_needed | bool
+    - gitlab_upgrade_backup_before | bool
+
+# The hold is what stops anything else from upgrading GitLab; lifting it is
+# part of the upgrade, and it goes back on below.
+- name: "DEBIAN | Allow the GitLab package to be replaced"
+  ansible.builtin.dpkg_selections:
+    name: "{{ gitlab_package_name }}"
+    selection: install
+  become: true
+  when: gitlab_upgrade_needed | bool
+
+- name: "DEBIAN | Install the GitLab release this upgrade targets"
+  ansible.builtin.apt:
+    name: "{{ gitlab_package_name }}={{ gitlab_version }}"
+    state: present
+    update_cache: true
+  become: true
+  when: gitlab_upgrade_needed | bool
+
+- name: "DEBIAN | Hold the GitLab package at the release just installed"
+  ansible.builtin.dpkg_selections:
+    name: "{{ gitlab_package_name }}"
+    selection: "{{ 'hold' if gitlab_package_hold | bool else 'install' }}"
+  become: true
+  when: gitlab_upgrade_needed | bool
+
+- name: "DEBIAN | Collect the package versions again now the new release is installed"
+  ansible.builtin.package_facts:
+    manager: apt
+  when: gitlab_upgrade_needed | bool
+
+- name: "ALL | Ensure the release that was asked for is the one that got installed"
+  ansible.builtin.assert:
+    that:
+      - (ansible_facts['packages'][gitlab_package_name] | first).version == gitlab_version
+    fail_msg: >-
+      apt installed
+      {{ (ansible_facts['packages'][gitlab_package_name] | first).version }}
+      where gitlab_version asked for {{ gitlab_version }}.
+    quiet: true
+  when: gitlab_upgrade_needed | bool
+
+# Runs the migrations the new release needs and rewrites every bundled
+# service's configuration. This is the long step — minutes to tens of minutes
+# on a large instance — and the one that must not be interrupted.
+- name: "ALL | Reconfigure GitLab onto the new release"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_ctl_command }}", reconfigure]
+  become: true
+  register: gitlab_upgrade_reconfigure
+  changed_when: true
+  when: gitlab_upgrade_needed | bool
+
+- name: "ALL | Restart GitLab so every service runs the new release"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_ctl_command }}", restart]
+  become: true
+  changed_when: true
+  when: gitlab_upgrade_needed | bool
+
+- name: "ALL | Verify the instance that came back is healthy and is the new release"
+  ansible.builtin.include_tasks: validate.yml
+  when:
+    - gitlab_upgrade_needed | bool
+    - gitlab_validate_enabled | bool
+
+- name: "ALL | Report the completed upgrade"
+  ansible.builtin.debug:
+    msg:
+      - "Upgraded            : {{ gitlab_upgrade_from }} -> {{ gitlab_version }}"
+      - "Running version     : {{ gitlab_running_version | default('not checked') }}"
+      - "Pre-upgrade backup  : {{ gitlab_backup_new_archives | default(['none taken']) | join(', ') }}"
+      - "Background migrations: GitLab finishes these after the upgrade — check Admin > Monitoring >"
+      - "                      Background migrations before the next upgrade."
+  when: gitlab_upgrade_needed | bool

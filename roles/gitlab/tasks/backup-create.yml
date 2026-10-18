@@ -1,0 +1,83 @@
+---
+# Takes a backup now, of both halves an instance needs to be restorable, and
+# proves a new archive of each actually appeared. Reachable three ways:
+#
+#   * `--tags backup` on a normal play (the task in main.yml is tagged never);
+#   * tasks_from: backup-create.yml, as playbooks/gitlab-backup.yml does;
+#   * from tasks/upgrade.yml, before the package is replaced.
+#
+# The archives are only proof against this host failing once they are copied
+# off it — gitlab_backup_upload_connection does that from GitLab itself, and
+# otherwise it is a job for whatever backs up the rest of your estate.
+
+- name: "ALL | Ensure both backup destinations exist"
+  ansible.builtin.include_tasks: backup-dirs.yml
+
+- name: "ALL | List the GitLab archives that exist before this backup runs"
+  ansible.builtin.find:
+    paths:
+      - "{{ gitlab_backup_path }}"
+      - "{{ gitlab_backup_config_path }}"
+    patterns:
+      - "*_gitlab_backup.tar"
+      - "gitlab_config_*.tar"
+  become: true
+  register: gitlab_backup_existing_archives
+
+- name: "ALL | Create a full GitLab data backup"
+  ansible.builtin.command:
+    argv: "{{ [gitlab_backup_command, 'create'] + gitlab_backup_skip_arguments }}"
+  become: true
+  register: gitlab_backup_data_run
+  changed_when: true
+
+- name: "ALL | Create a backup of the GitLab configuration and secrets"
+  ansible.builtin.command:
+    argv:
+      - "{{ gitlab_ctl_command }}"
+      - backup-etc
+      - --backup-path
+      - "{{ gitlab_backup_config_path }}"
+  become: true
+  register: gitlab_backup_config_run
+  changed_when: true
+
+- name: "ALL | List the GitLab archives that exist now"
+  ansible.builtin.find:
+    paths:
+      - "{{ gitlab_backup_path }}"
+      - "{{ gitlab_backup_config_path }}"
+    patterns:
+      - "*_gitlab_backup.tar"
+      - "gitlab_config_*.tar"
+  become: true
+  register: gitlab_backup_current_archives
+
+- name: "ALL | Determine which archives this backup produced"
+  ansible.builtin.set_fact:
+    gitlab_backup_new_archives: >-
+      {{ (gitlab_backup_current_archives.files | map(attribute='path') | list)
+         | difference(gitlab_backup_existing_archives.files | map(attribute='path') | list) | sort }}
+
+# Both commands exit 0 on a backup that skipped everything it could not read,
+# so the archives themselves are what gets checked, not the exit codes.
+- name: "ALL | Ensure both a data archive and a configuration archive were written"
+  ansible.builtin.assert:
+    that:
+      - gitlab_backup_new_archives | select('search', '_gitlab_backup\.tar$') | list | length > 0
+      - gitlab_backup_new_archives | select('search', 'gitlab_config_.*\.tar$') | list | length > 0
+    fail_msg: >-
+      The backup produced {{ gitlab_backup_new_archives | join(', ') | default('nothing', true) }}.
+      A restorable backup needs a data archive in {{ gitlab_backup_path }} and
+      a configuration archive in {{ gitlab_backup_config_path }}. The backup
+      output ended with:
+      {{ gitlab_backup_data_run.stdout_lines[-5:] | default([]) | join(' / ') }}
+    quiet: true
+
+- name: "ALL | Report what the backup wrote"
+  ansible.builtin.debug:
+    msg:
+      - "Archives written    : {{ gitlab_backup_new_archives | join(', ') }}"
+      - "Data retention      : {{ (gitlab_backup_keep_time | int / 86400) | round(1) }} days (GitLab prunes these itself)"
+      - "Config retention    : {{ gitlab_backup_config_keep_days }} days"
+      - "Restore             : sudo gitlab-backup restore BACKUP=<timestamp_version> — see roles/gitlab/README.md"

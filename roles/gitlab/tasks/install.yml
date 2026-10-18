@@ -1,0 +1,51 @@
+---
+# Installing and upgrading are deliberately not the same thing here. A GitLab
+# upgrade replaces the application and then runs database migrations that
+# cannot be rolled back, so this file only ever installs GitLab where it is
+# absent. Moving a running instance to another release goes through
+# tasks/upgrade.yml, which backs it up first and verifies it afterwards.
+
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: "ALL | Record which GitLab release this host already has, if any"
+  ansible.builtin.set_fact:
+    gitlab_installed_package_version: >-
+      {{ (ansible_facts['packages'][gitlab_package_name] | default([]) | first | default({})).version | default('') }}
+
+- name: "DEBIAN | Ensure GitLab is installed at the requested release"
+  ansible.builtin.apt:
+    name: "{{ gitlab_package_name }}{{ ('=' ~ gitlab_version) if gitlab_version | length > 0 else '' }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  notify: "ALL | Reconfigure GitLab so the rendered configuration is applied"
+  when: gitlab_installed_package_version | length == 0
+
+# Not an assert: finding a pending upgrade is not a reason to fail a
+# configuration run, and silently applying it is exactly what this role must
+# not do.
+- name: "ALL | Report that the pinned GitLab release is not the one installed"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} runs {{ gitlab_package_name }}
+      {{ gitlab_installed_package_version }} while gitlab_version pins
+      {{ gitlab_version }}. This play leaves it alone: replacing the package
+      runs database migrations, so it belongs in the upgrade path, which takes
+      a backup first and verifies the instance afterwards. Run
+      `ansible-playbook playbooks/gitlab-upgrade.yml -e gitlab_upgrade_enabled=true`.
+  when:
+    - gitlab_installed_package_version | length > 0
+    - gitlab_version | length > 0
+    - gitlab_installed_package_version != gitlab_version
+
+# unattended-upgrades and a stray `apt upgrade` both treat GitLab as an
+# ordinary package. It is not: the new version migrates the database on its
+# first reconfigure, at whatever hour the timer happened to fire.
+- name: "DEBIAN | Ensure the GitLab package is {{ 'held at its installed release' if gitlab_package_hold | bool else 'not held' }}"
+  ansible.builtin.dpkg_selections:
+    name: "{{ gitlab_package_name }}"
+    selection: "{{ 'hold' if gitlab_package_hold | bool else 'install' }}"
+  become: true

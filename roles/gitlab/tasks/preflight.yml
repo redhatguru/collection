@@ -1,0 +1,304 @@
+---
+# Everything here runs before a single package is installed, and nothing here
+# changes the host. GitLab is a large install with a long first reconfigure:
+# a host that is too small, an Ubuntu release the repository has no packages
+# for or an external URL that does not resolve all fail far later and far less
+# clearly than an assert does.
+
+- name: "ALL | Ensure the operating system and the architecture are ones this role supports"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] in gitlab_supported_os_families
+      - ansible_facts['distribution'] in gitlab_supported_distributions
+      - ansible_facts['architecture'] in gitlab_supported_architectures
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} on
+      {{ ansible_facts['architecture'] }}. This role installs the GitLab
+      Omnibus package on {{ gitlab_supported_distributions | join(' or ') }}
+      ({{ gitlab_supported_architectures | join(' or ') }}) only.
+    quiet: true
+
+- name: "DEBIAN | Ensure the Ubuntu release has GitLab packages published for it"
+  ansible.builtin.assert:
+    that:
+      - gitlab_repository_suite in gitlab_supported_ubuntu_releases
+    fail_msg: >-
+      There is no GitLab Omnibus repository for Ubuntu
+      '{{ gitlab_repository_suite }}'. Packages are published for
+      {{ gitlab_supported_ubuntu_releases | join(', ') }}. On a newer Ubuntu
+      than GitLab has caught up with, point gitlab_repository_suite at the
+      most recent supported codename deliberately.
+    quiet: true
+
+# --------------------------------------------------------------------------
+# Hardware
+# --------------------------------------------------------------------------
+
+# Which disk requirement applies depends on this. package_facts is collected
+# again in install.yml rather than shared from here, so that each entry point
+# into the role stands on its own — it is a couple of seconds, read-only.
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: "ALL | Record whether this host already carries a GitLab"
+  ansible.builtin.set_fact:
+    gitlab_preflight_already_installed: "{{ gitlab_package_name in ansible_facts['packages'] }}"
+
+- name: "ALL | Measure the free space on the filesystems GitLab installs into"
+  # df needs a path that exists, and on a first install most of GitLab's
+  # directories do not yet — so walk up to the nearest existing parent, which
+  # is on the same filesystem the directory will be created on.
+  #
+  # df's output is read from the last line rather than piped through tail:
+  # /bin/sh is dash on Ubuntu, which has no pipefail, so a pipe here would
+  # hide a failing df behind tail's exit code.
+  ansible.builtin.shell:
+    cmd: |
+      path={{ item | quote }}
+      while [ ! -d "$path" ]; do path=$(dirname "$path"); done
+      df --block-size=1M --output=avail,target "$path"
+  register: gitlab_preflight_disk
+  changed_when: false
+  loop: "{{ gitlab_preflight_disk_paths }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: "ALL | Ensure this host has the CPU, memory and swap GitLab needs"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['processor_vcpus'] | int >= gitlab_preflight_min_cpu | int
+      - ansible_facts['memtotal_mb'] | int >= gitlab_preflight_min_memory_mb | int
+      - ansible_facts['swaptotal_mb'] | int >= gitlab_preflight_min_swap_mb | int
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_facts['processor_vcpus'] }} vCPU,
+      {{ ansible_facts['memtotal_mb'] }} MB RAM and
+      {{ ansible_facts['swaptotal_mb'] }} MB swap. GitLab needs at least
+      {{ gitlab_preflight_min_cpu }} vCPU,
+      {{ gitlab_preflight_min_memory_mb }} MB RAM and
+      {{ gitlab_preflight_min_swap_mb }} MB swap for a single-node install.
+      Below that the first `gitlab-ctl reconfigure` either takes hours or is
+      killed by the OOM reaper half way through the database migrations, which
+      leaves the instance in a state no later run repairs. Resize the host, or
+      lower gitlab_preflight_min_* deliberately for a lab you accept will
+      swap.
+    quiet: true
+
+- name: "ALL | Ensure every filesystem GitLab installs into has enough free space"
+  ansible.builtin.assert:
+    that:
+      - gitlab_preflight_disk_line | split() | first | int >= gitlab_preflight_disk_free_required_mb | int
+    fail_msg: >-
+      {{ item.item }} lives on {{ gitlab_preflight_disk_line | split() | last }},
+      which has {{ gitlab_preflight_disk_line | split() | first }} MB free.
+      {{ gitlab_preflight_disk_free_required_mb }} MB is required
+      {{ gitlab_preflight_disk_free_reason }}.
+    quiet: true
+  vars:
+    # The header is the first line; the filesystem holding the path is the last.
+    gitlab_preflight_disk_line: "{{ item.stdout_lines | last }}"
+    gitlab_preflight_disk_free_required_mb: >-
+      {{ gitlab_preflight_min_disk_free_installed_mb
+         if gitlab_preflight_already_installed | bool
+         else gitlab_preflight_min_disk_free_mb }}
+    gitlab_preflight_disk_free_installed_reason: >-
+      to keep this instance upgradeable and backed up
+      (gitlab_preflight_min_disk_free_installed_mb)
+    gitlab_preflight_disk_free_fresh_reason: >-
+      to install GitLab here (gitlab_preflight_min_disk_free_mb): the package
+      itself needs around 2500 MB, and the rest is repositories, artifacts,
+      container images and the backup tarballs
+    gitlab_preflight_disk_free_reason: >-
+      {{ gitlab_preflight_disk_free_installed_reason
+         if gitlab_preflight_already_installed | bool
+         else gitlab_preflight_disk_free_fresh_reason }}
+  loop: "{{ gitlab_preflight_disk.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# --------------------------------------------------------------------------
+# The instance's own configuration
+# --------------------------------------------------------------------------
+
+- name: "ALL | Ensure the external URL is one GitLab can serve"
+  ansible.builtin.assert:
+    that:
+      - gitlab_external_url_scheme in ['http', 'https']
+      - gitlab_external_url_host | length > 0
+      - gitlab_external_url_host != 'localhost'
+    fail_msg: >-
+      gitlab_external_url is '{{ gitlab_external_url }}'. It must be an http
+      or https URL with a host name clients can actually reach, for example
+      'https://gitlab.example.com' — every clone URL, email link and OAuth
+      redirect GitLab hands out is built from it, and changing it after the
+      first reconfigure invalidates all of them.
+    quiet: true
+
+# An unresolvable key comes back as {<key>: none}, where a name that resolves
+# comes back keyed by its address instead — so a null value anywhere in the
+# result is the lookup that failed. A URL built on a bare address needs no
+# lookup at all, and is skipped: plenty of them have no reverse record.
+- name: "ALL | Resolve the host name clients will reach GitLab on"
+  ansible.builtin.getent:
+    database: hosts
+    key: "{{ gitlab_external_url_host }}"
+    fail_key: false
+  when:
+    - gitlab_preflight_check_external_url_resolves | bool
+    - gitlab_external_url_host is not match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+
+- name: "ALL | Ensure the external URL host resolves on this host"
+  ansible.builtin.assert:
+    that:
+      - (ansible_facts['getent_hosts'] | default({})).values() | select('none') | list | length == 0
+    fail_msg: >-
+      '{{ gitlab_external_url_host }}' does not resolve. GitLab installs
+      anyway, but its clone URLs and email links point at a name nothing can
+      look up — and Let's Encrypt and the role's own HTTP validation both
+      need it. Add the DNS record (or the /etc/hosts entry) first, or set
+      gitlab_preflight_check_external_url_resolves to false if the name is
+      only resolvable elsewhere.
+    quiet: true
+  when:
+    - gitlab_preflight_check_external_url_resolves | bool
+    - gitlab_external_url_host is not match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+
+- name: "ALL | Ensure the requested GitLab release is well formed"
+  ansible.builtin.assert:
+    that:
+      - gitlab_version is match('^[0-9]+\.[0-9]+\.[0-9]+-' ~ gitlab_edition ~ '\.[0-9]+$')
+    fail_msg: >-
+      gitlab_version is '{{ gitlab_version }}'. A pinned release looks like
+      '19.5.0-{{ gitlab_edition }}.0' — the package revision suffix included,
+      because that is what apt installs. Leave it empty to track whatever the
+      repository calls newest.
+    quiet: true
+  when: gitlab_version | length > 0
+
+- name: "ALL | Ensure GitLab has exactly one database to use"
+  ansible.builtin.assert:
+    that:
+      - gitlab_postgresql_enabled | bool or gitlab_database_external_enabled | bool
+      - not (gitlab_database_external_enabled | bool and gitlab_database_host | length == 0)
+    fail_msg: >-
+      GitLab needs either the bundled PostgreSQL
+      (gitlab_postgresql_enabled, the default) or an external one
+      (gitlab_database_external_enabled with gitlab_database_host set).
+      Bundled PostgreSQL is currently
+      {{ 'on' if gitlab_postgresql_enabled | bool else 'off' }} and the
+      external host is '{{ gitlab_database_host }}'.
+    quiet: true
+
+- name: "ALL | Ensure the certificate source is one this role implements"
+  ansible.builtin.assert:
+    that:
+      - gitlab_tls_certificate_source in ['file', 'self-signed', 'letsencrypt']
+    fail_msg: >-
+      gitlab_tls_certificate_source is '{{ gitlab_tls_certificate_source }}'.
+      It has to be 'file' (a certificate you manage), 'self-signed' (generated
+      on the host by this role) or 'letsencrypt' (issued and renewed by
+      GitLab).
+    quiet: true
+  when: gitlab_tls_enabled | bool
+
+- name: "ALL | Ensure an https instance has a certificate to serve"
+  ansible.builtin.assert:
+    that:
+      - gitlab_nginx_ssl_certificate | length > 0
+      - gitlab_nginx_ssl_certificate_key | length > 0
+    fail_msg: >-
+      gitlab_external_url is https and gitlab_tls_certificate_source is
+      'file', but gitlab_nginx_ssl_certificate{{ ' and the key path are' if gitlab_nginx_ssl_certificate | length == 0 else ' key is' }}
+      not set — nginx would look for
+      /etc/gitlab/ssl/{{ gitlab_external_url_host }}.crt and refuse to start
+      without it. Either point those two at the certificate you manage, or
+      pick another source: 'self-signed' has the role generate one (right for
+      an internal name or an IP address, which no public CA will certify), and
+      'letsencrypt' has GitLab issue one. Plain HTTP is also a choice — make
+      gitlab_external_url start with http:// and none of this applies.
+    quiet: true
+  when:
+    - gitlab_tls_enabled | bool
+    - gitlab_tls_certificate_source == 'file'
+
+- name: "ALL | Ensure Let's Encrypt has what it needs to issue a certificate"
+  ansible.builtin.assert:
+    that:
+      - gitlab_external_url_is_https | bool
+      - gitlab_letsencrypt_contact_emails | length > 0
+      - gitlab_external_url_host is not match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+    fail_msg: >-
+      gitlab_tls_certificate_source is 'letsencrypt', which needs an https
+      gitlab_external_url (it is '{{ gitlab_external_url }}') pointing at a
+      publicly resolvable name — Let's Encrypt cannot certify an IP address —
+      and at least one address in gitlab_letsencrypt_contact_emails, where it
+      sends expiry warnings. The HTTP-01 challenge also needs port 80 on this
+      host reachable from the internet; where it is not, 'self-signed' is the
+      source that works.
+    quiet: true
+  when:
+    - gitlab_tls_enabled | bool
+    - gitlab_tls_certificate_source == 'letsencrypt'
+
+- name: "ALL | Ensure the optional components that are switched on are configured"
+  ansible.builtin.assert:
+    that:
+      - not gitlab_registry_enabled | bool or gitlab_registry_external_url | length > 0
+      - not gitlab_pages_enabled | bool or gitlab_pages_external_url | length > 0
+      - not gitlab_smtp_enabled | bool or gitlab_smtp_address | length > 0
+    fail_msg: >-
+      An enabled component is missing its address: the container registry
+      needs gitlab_registry_external_url, GitLab Pages needs
+      gitlab_pages_external_url, and SMTP needs gitlab_smtp_address.
+    quiet: true
+
+- name: "ALL | Ensure nothing is excluded from the backup by a name GitLab does not know"
+  ansible.builtin.assert:
+    that:
+      - gitlab_backup_skip | difference(gitlab_backup_skip_choices) | length == 0
+    fail_msg: >-
+      gitlab_backup_skip contains
+      {{ gitlab_backup_skip | difference(gitlab_backup_skip_choices) | join(', ') }},
+      which `gitlab-backup create SKIP=...` does not recognise — it ignores
+      the unknown name and backs the component up anyway, so a backup you
+      believed was small quietly is not. Valid names:
+      {{ gitlab_backup_skip_choices | join(', ') }}.
+    quiet: true
+  vars:
+    gitlab_backup_skip_choices:
+      - db
+      - uploads
+      - builds
+      - artifacts
+      - lfs
+      - terraform_state
+      - registry
+      - pages
+      - repositories
+      - packages
+      - ci_secure_files
+  when: gitlab_backup_skip | length > 0
+
+- name: "ALL | Check that the GitLab package repository is reachable from this host"
+  ansible.builtin.uri:
+    url: "{{ gitlab_repository_gpg_key_url }}"
+    method: HEAD
+    timeout: 30
+  register: gitlab_preflight_repository
+  changed_when: false
+  failed_when: false
+  when: gitlab_preflight_check_repository_reachable | bool
+
+- name: "ALL | Ensure the GitLab package repository answers"
+  ansible.builtin.assert:
+    that:
+      - gitlab_preflight_repository.status | default(0) == 200
+    fail_msg: >-
+      {{ gitlab_repository_gpg_key_url }} returned
+      '{{ gitlab_preflight_repository.msg | default('no response') }}'. The
+      install needs this host to reach packages.gitlab.com over HTTPS —
+      check the proxy settings or mirror the repository and point
+      gitlab_repository_url and gitlab_repository_gpg_key_url at the mirror.
+    quiet: true
+  when: gitlab_preflight_check_repository_reachable | bool

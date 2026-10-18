@@ -1,0 +1,33 @@
+---
+# Deliberately short, and nothing here prints a password. The full service
+# listing is behind gitlab_debug so a normal run stays readable.
+
+- name: "ALL | Print the GitLab report"
+  ansible.builtin.debug:
+    msg:
+      - "URL                 : {{ gitlab_external_url }}"
+      - "Edition             : {{ gitlab_package_name }}"
+      - "Installed release   : {{ gitlab_installed_version | default(gitlab_installed_package_version) | default('unknown', true) }}"
+      - "Running version     : {{ gitlab_running_version | default('not checked') }}"
+      - "Pinned release      : {{ gitlab_version | default('none — tracks the repository', true) }}"
+      - "Package hold        : {{ 'held, upgrades only via playbooks/gitlab-upgrade.yml' if gitlab_package_hold | bool else 'not held' }}"
+      - "Database            : {{ 'external at ' ~ gitlab_database_host if gitlab_database_external_enabled | bool else 'bundled PostgreSQL' }}"
+      - "Data backups        : {{ gitlab_backup_path }}"
+      - "Backup schedule     : {{ gitlab_backup_schedule_description }}"
+      - "Config backups      : {{ gitlab_backup_config_path }}, kept {{ gitlab_backup_config_keep_days }} days"
+      - "Container registry  : {{ gitlab_registry_external_url if gitlab_registry_enabled | bool else 'disabled' }}"
+      - "First sign-in       : user 'root', with the password from gitlab_initial_root_password"
+      - "Take a backup now   : ansible-playbook playbooks/gitlab-backup.yml"
+
+- name: "ALL | Collect the full GitLab state for the debug report"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_ctl_command }}", status]
+  become: true
+  register: gitlab_report_status
+  changed_when: false
+  when: gitlab_debug | bool
+
+- name: "ALL | Print the full GitLab state"
+  ansible.builtin.debug:
+    msg: "{{ gitlab_report_status.stdout_lines | default([]) }}"
+  when: gitlab_debug | bool

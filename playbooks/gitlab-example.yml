@@ -1,0 +1,420 @@
+---
+# Worked example: a complete, self-contained GitLab deployment.
+#
+# Every variable the role accepts is either set below or listed as a
+# commented-out block, so this file doubles as the checklist for a rollout —
+# copy it, change the values, delete what you do not need. The full
+# explanation of each one is in roles/gitlab/defaults/main.yml and
+# roles/gitlab/README.md.
+#
+#   ansible-playbook -i inventories/lab-gitlab/hosts.yml \
+#     playbooks/gitlab-example.yml
+#
+# A note on where variables belong. Play `vars:` sit high in Ansible's
+# precedence order — above inventory group_vars and host_vars, below only
+# `-e` extra-vars — so what is set here cannot be overridden per host from
+# inventory. That is exactly right for a single instance you build from one
+# file, and wrong as soon as you have a second one. For more than one
+# instance, move these into inventory (see
+# inventories/lab-gitlab/group_vars/gitlab_servers.yml) and use
+# playbooks/gitlab.yml, which deliberately carries no variables of its own.
+#
+# Secrets belong in Ansible Vault, not here. The placeholders below are
+# obviously fake on purpose:
+#   ansible-vault encrypt_string --name vault_gitlab_root_password '<value>'
+#
+# This play installs and configures. Backups of a running instance go through
+# playbooks/gitlab-backup.yml, and moving to a new release through
+# playbooks/gitlab-upgrade.yml — neither is part of a configuration run, and
+# roles/gitlab/README.md section 9 explains why.
+- name: Install and configure GitLab from a fully specified example
+  hosts: gitlab_servers
+  gather_facts: true
+
+  # become is set per task inside the role rather than for the whole play, so
+  # the tasks that do not need root do not get it.
+
+  vars:
+
+    # ----------------------------------------------------------------------
+    # Release and edition — the one variable that decides what gets installed
+    # ----------------------------------------------------------------------
+
+    gitlab_edition: "ce"
+
+    # Pin it. Left empty the role installs whatever the repository calls
+    # newest today, so two runs weeks apart install different versions — and
+    # an upgrade refuses to run unpinned. Check the release you want against
+    # <https://docs.gitlab.com/update/upgrade_paths/> before raising it.
+    gitlab_version: "19.5.0-ce.0"
+
+    # Hold the package in dpkg, so unattended-upgrades cannot run a GitLab
+    # upgrade — which migrates the database — at 06:00 on its own.
+    gitlab_package_hold: true
+
+    # ----------------------------------------------------------------------
+    # Package repository — only touch these for an internal mirror
+    # ----------------------------------------------------------------------
+    #
+    # The values below are the role's own defaults, spelled out so this file
+    # stays a complete picture. Point them at a mirror on a host that cannot
+    # reach packages.gitlab.com; the preflight checks verify whatever they
+    # name is actually reachable.
+
+    gitlab_repository_url: "https://packages.gitlab.com/gitlab/gitlab-{{ gitlab_edition }}/ubuntu"
+    gitlab_repository_gpg_key_url: "https://packages.gitlab.com/gitlab/gitlab-{{ gitlab_edition }}/gpgkey"
+
+    # The host's own Ubuntu codename, which is right unless you are
+    # deliberately pinning an older suite.
+    gitlab_repository_suite: "{{ ansible_facts['distribution_release'] }}"
+    gitlab_repository_components: "main"
+
+    # ----------------------------------------------------------------------
+    # Hardware requirements, checked before anything is installed
+    # ----------------------------------------------------------------------
+    #
+    # GitLab's own published minimums for a single-node install up to ~500
+    # users. Raise them for a busier instance; lower them only for a lab you
+    # accept will swap.
+
+    gitlab_preflight_enabled: true
+    gitlab_preflight_min_cpu: 4
+
+    # Deliberately just under GitLab's round 4 GB and 2 GB: the kernel and
+    # firmware reserve a few percent of RAM, and `mkswap` reserves a page for
+    # its header, so a host provisioned with exactly that much reports a
+    # little less (a 2 GiB swap device reports 2047 MB). Round thresholds
+    # would reject hosts that are sized exactly as documented.
+    gitlab_preflight_min_memory_mb: 3900
+    gitlab_preflight_min_swap_mb: 2040
+
+    # Two figures, because the question changes once GitLab is there: a fresh
+    # host needs room for the package and the data, while a running instance
+    # needs enough left for the next package upgrade and a backup.
+    gitlab_preflight_min_disk_free_mb: 20480
+    gitlab_preflight_min_disk_free_installed_mb: 5120
+    gitlab_preflight_disk_paths:
+      - "/opt"
+      - "/var/opt/gitlab"
+      - "/etc/gitlab"
+
+    gitlab_preflight_check_external_url_resolves: true
+    gitlab_preflight_check_repository_reachable: true
+
+    # ----------------------------------------------------------------------
+    # Instance identity
+    # ----------------------------------------------------------------------
+
+    # Every clone URL, email link and OAuth redirect GitLab hands out is built
+    # from this, and changing it after the first reconfigure invalidates all
+    # of them. The name has to resolve on the host itself.
+    gitlab_external_url: "https://gitlab.example.com"
+
+    gitlab_time_zone: "Europe/Amsterdam"
+
+    # Applied on the very first reconfigure and ignored on every run after it.
+    # Replace with "{{ vault_gitlab_root_password }}".
+    gitlab_initial_root_password: "ChangeMe123!"
+
+    # Writing /etc/gitlab/initial_root_password is pointless when the password
+    # is supplied above, and leaves a credential in a file for 24 hours.
+    gitlab_initial_root_password_store: false
+
+    # Advertised in SSH clone URLs. This does not move sshd.
+    gitlab_shell_ssh_port: 22
+
+    # Reverse proxies in front of GitLab, so it logs and rate-limits the real
+    # client address instead of the proxy's.
+    gitlab_trusted_proxies: []
+
+    # ----------------------------------------------------------------------
+    # http or https — the scheme of gitlab_external_url above is the choice
+    # ----------------------------------------------------------------------
+    #
+    # Over http this whole block is inert. Over https, this says where the
+    # certificate comes from:
+    #
+    #   file        — the two paths below, files you manage. Nothing is
+    #                 created or copied by the role.
+    #   self-signed — generated on the host by the role, covering the external
+    #                 URL's host (a name or an IP address, whichever it is).
+    #                 The only option that works on a name no public CA will
+    #                 certify; clients warn until it is trusted.
+    #   letsencrypt — issued and renewed by GitLab. Needs a public name and
+    #                 port 80 reachable from the internet.
+    gitlab_tls_certificate_source: "file"
+
+    gitlab_nginx_enabled: true
+
+    # Empty follows the scheme and port of the external URL. Behind a load
+    # balancer that terminates TLS, set gitlab_nginx_listen_https to false and
+    # list the balancer in gitlab_trusted_proxies above.
+    gitlab_nginx_listen_https: ""
+    gitlab_nginx_listen_port: ""
+    gitlab_nginx_redirect_http_to_https: true
+
+    # The "file" source. The role does not create or copy these — it only
+    # points nginx at them.
+    gitlab_nginx_ssl_certificate: "/etc/gitlab/ssl/gitlab.example.com.crt"
+    gitlab_nginx_ssl_certificate_key: "/etc/gitlab/ssl/gitlab.example.com.key"
+
+    # The "self-signed" source. The key and certificate land in this directory
+    # named after the external URL's host, which is where GitLab itself looks.
+    gitlab_tls_self_signed_dir: "/etc/gitlab/ssl"
+    gitlab_tls_self_signed_days: 3650
+    gitlab_tls_self_signed_key_size: 4096
+
+    # Extra names and addresses clients reach this instance on.
+    gitlab_tls_self_signed_extra_sans: []
+    #  - "DNS:gitlab.internal.example"
+    #  - "IP:10.11.0.251"
+
+    # Understand the max-age before raising it: a browser that has seen this
+    # header refuses plain HTTP to this host for the whole period, cached
+    # locally, with no way for you to revoke it.
+    gitlab_nginx_hsts_enabled: true
+    gitlab_nginx_hsts_max_age: 31536000
+
+    # The practical limit on an HTTP push or a large upload.
+    gitlab_nginx_client_max_body_size: "250m"
+
+    # Any other nginx['...'] setting.
+    gitlab_nginx_extra_configuration: {}
+    #  ssl_protocols: "TLSv1.2 TLSv1.3"
+
+    # The "letsencrypt" source. Expiry warnings go here, and Let's Encrypt
+    # refuses to issue without at least one address.
+    gitlab_letsencrypt_contact_emails: []
+    #  - "ops@example.com"
+    gitlab_letsencrypt_auto_renew: true
+    gitlab_letsencrypt_auto_renew_hour: 3
+    gitlab_letsencrypt_auto_renew_minute: 30
+    gitlab_letsencrypt_auto_renew_day_of_month: "*/7"
+
+    # ----------------------------------------------------------------------
+    # Outgoing email
+    # ----------------------------------------------------------------------
+    #
+    # With SMTP off, GitLab tries to deliver through a local MTA that this
+    # role does not install — so password resets and notifications go nowhere.
+
+    gitlab_smtp_enabled: true
+    gitlab_smtp_address: "smtp.example.com"
+    gitlab_smtp_port: 587
+    gitlab_smtp_user_name: "gitlab@example.com"
+    gitlab_smtp_password: "ChangeMe123!"
+    gitlab_smtp_domain: "example.com"
+    gitlab_smtp_authentication: "login"
+    gitlab_smtp_enable_starttls_auto: true
+    gitlab_smtp_tls: false
+    gitlab_smtp_openssl_verify_mode: "peer"
+
+    gitlab_email_enabled: true
+    gitlab_email_from: "gitlab@example.com"
+    gitlab_email_display_name: "GitLab"
+    gitlab_email_reply_to: "noreply@example.com"
+
+    # ----------------------------------------------------------------------
+    # Backups — both halves, because a restore needs both
+    # ----------------------------------------------------------------------
+
+    gitlab_backup_enabled: true
+    gitlab_backup_path: "/var/opt/gitlab/backups"
+    gitlab_backup_config_path: "/etc/gitlab/config_backup"
+
+    # GitLab prunes the data archives itself on this (seconds, 7 days); the
+    # configuration archives are pruned by a job the role installs.
+    gitlab_backup_keep_time: 604800
+    gitlab_backup_config_keep_days: 7
+
+    # Ruby literal, rendered verbatim. Each archive holds every repository and
+    # the whole database: readable by its owner only.
+    gitlab_backup_archive_permissions: "0o600"
+
+    # Components to leave out, for data that is backed up elsewhere. An
+    # unknown name here is rejected by the preflight checks.
+    gitlab_backup_skip: []
+    #  - registry
+
+    gitlab_backup_schedule_enabled: true
+    gitlab_backup_minute: "0"
+    gitlab_backup_hour: "2"
+    gitlab_backup_day: "*"
+    gitlab_backup_month: "*"
+    gitlab_backup_weekday: "*"
+
+    # The configuration backup runs an hour earlier, so a half-finished one is
+    # never the newest.
+    gitlab_backup_config_minute: "0"
+    gitlab_backup_config_hour: "1"
+
+    # The archives are only proof against this host failing once they are
+    # copied off it. Either let GitLab upload them, or make sure whatever
+    # backs up the rest of your estate collects both directories above.
+    gitlab_backup_upload_connection: {}
+    #  provider: AWS
+    #  region: eu-west-1
+    #  aws_access_key_id: "{{ vault_gitlab_backup_key_id }}"
+    #  aws_secret_access_key: "{{ vault_gitlab_backup_secret }}"
+    gitlab_backup_upload_remote_directory: ""
+
+    # ----------------------------------------------------------------------
+    # Service sizing — these suit the 4 vCPU / 4 GB minimum above
+    # ----------------------------------------------------------------------
+
+    gitlab_puma_worker_processes: 2
+    gitlab_puma_min_threads: 4
+    gitlab_puma_max_threads: 4
+    gitlab_puma_per_worker_max_memory_mb: 1024
+    gitlab_puma_extra_configuration: {}
+
+    gitlab_sidekiq_max_concurrency: 10
+    gitlab_sidekiq_extra_configuration: {}
+
+    # ----------------------------------------------------------------------
+    # Datastores
+    # ----------------------------------------------------------------------
+
+    gitlab_postgresql_enabled: true
+    gitlab_postgresql_shared_buffers: "512MB"
+    gitlab_postgresql_max_connections: 200
+    gitlab_postgresql_max_worker_processes: 8
+    gitlab_postgresql_extra_configuration: {}
+
+    # An external PostgreSQL instead of the bundled one — for example one
+    # built by this collection's postgresql role. GitLab needs exactly one of
+    # the two, and the preflight checks insist on it.
+    gitlab_database_external_enabled: false
+    gitlab_database_host: ""
+    gitlab_database_port: 5432
+    gitlab_database_name: "gitlabhq_production"
+    gitlab_database_user: "gitlab"
+    gitlab_database_password: ""
+    gitlab_database_sslmode: "require"
+
+    gitlab_redis_enabled: true
+    gitlab_redis_maxmemory: ""
+    gitlab_redis_extra_configuration: {}
+
+    # ----------------------------------------------------------------------
+    # Optional components
+    # ----------------------------------------------------------------------
+
+    # The container registry. An https URL of its own needs its own
+    # certificate unless it shares this host name on a different port.
+    gitlab_registry_enabled: false
+    gitlab_registry_external_url: ""
+    gitlab_registry_storage_path: "/var/opt/gitlab/gitlab-rails/shared/registry"
+    gitlab_registry_extra_configuration: {}
+    gitlab_registry_nginx_extra_configuration: {}
+
+    gitlab_pages_enabled: false
+    gitlab_pages_external_url: ""
+    gitlab_pages_extra_configuration: {}
+
+    # The agent server for Kubernetes. Turning it off saves a little memory on
+    # an instance that has no agents.
+    gitlab_kas_enabled: true
+
+    # A second application with its own upgrade and backup story sharing
+    # GitLab's lifecycle. Worth leaving off.
+    gitlab_mattermost_enabled: false
+
+    # ----------------------------------------------------------------------
+    # Monitoring
+    # ----------------------------------------------------------------------
+
+    # Prometheus and node_exporter are what GitLab's own admin dashboards read
+    # from. Alertmanager only earns its memory once something receives the
+    # alerts.
+    gitlab_prometheus_enabled: true
+    gitlab_prometheus_extra_configuration: {}
+    gitlab_node_exporter_enabled: true
+    gitlab_alertmanager_enabled: false
+
+    # Addresses allowed to read /-/health, /-/readiness, /-/liveness and
+    # /-/metrics. The role's own validation reads them over the loopback
+    # interface, so keep 127.0.0.0/8 in the list.
+    gitlab_monitoring_whitelist:
+      - "127.0.0.0/8"
+      - "::1/128"
+
+    # ----------------------------------------------------------------------
+    # Authentication
+    # ----------------------------------------------------------------------
+
+    # LDAP/Active Directory. The dict is rendered into gitlab.rb as the YAML
+    # block GitLab documents, so it takes every key GitLab documents.
+    gitlab_ldap_enabled: false
+    gitlab_ldap_servers: {}
+    #  main:
+    #    label: "Active Directory"
+    #    host: "dc01.example.com"
+    #    port: 636
+    #    encryption: "simple_tls"
+    #    bind_dn: "CN=gitlab,OU=Service Accounts,DC=example,DC=com"
+    #    password: "{{ vault_gitlab_ldap_password }}"
+    #    base: "OU=Users,DC=example,DC=com"
+    #    active_directory: true
+
+    # SAML, OIDC, GitHub and friends.
+    gitlab_omniauth_enabled: false
+    gitlab_omniauth_providers: []
+    gitlab_omniauth_allow_single_sign_on: []
+    gitlab_omniauth_block_auto_created_users: true
+
+    # ----------------------------------------------------------------------
+    # Anything the variables above do not cover
+    # ----------------------------------------------------------------------
+
+    # Any gitlab_rails['...'] setting. Values become Ruby literals, so
+    # strings, numbers, booleans, lists and dicts all work.
+    gitlab_rails_extra_configuration:
+      gitlab_default_theme: 2
+      gitlab_username_changing_enabled: false
+
+    # Raw Ruby, appended verbatim and never parsed by the role — for the rare
+    # setting that is not a simple assignment.
+    gitlab_extra_configuration: ""
+    #  gitlab_rails['object_store']['enabled'] = true
+
+    # ----------------------------------------------------------------------
+    # Verification after the run
+    # ----------------------------------------------------------------------
+
+    gitlab_validate_enabled: true
+    gitlab_validate_check_services: true
+    gitlab_validate_check_version: true
+    gitlab_validate_check_http: true
+    gitlab_validate_check_migrations: true
+
+    # GitLab's own full self-test. Thorough, and slow enough to be opt-in.
+    gitlab_validate_run_gitlab_check: false
+
+    # The HTTP checks dial the loopback interface with a Host header, so the
+    # certificate will not match the address dialled.
+    gitlab_validate_http_validate_certs: false
+
+    # GitLab needs a few minutes after a reconfigure before Puma answers.
+    gitlab_validate_retries: 60
+    gitlab_validate_delay: 10
+
+    # Adds the full `gitlab-ctl status` output to the end-of-run report.
+    gitlab_debug: false
+
+    # ----------------------------------------------------------------------
+    # Upgrades — not part of this play
+    # ----------------------------------------------------------------------
+    #
+    # Left at their defaults here on purpose. Raising gitlab_version above on
+    # an instance that already runs an older release makes this play report
+    # that an upgrade is pending and change nothing: replacing the package
+    # runs database migrations, so it belongs in playbooks/gitlab-upgrade.yml,
+    # which backs the instance up first and verifies it afterwards.
+
+    gitlab_upgrade_enabled: false
+    gitlab_upgrade_backup_before: true
+    gitlab_upgrade_allow_path_skip: false
+
+  roles:
+    - role: redhatguru.general.gitlab

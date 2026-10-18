@@ -1,0 +1,25 @@
+---
+# Installs GitLab at the release below the newest one, so that side-effect.yml
+# has somewhere to upgrade to. Everything else about the instance comes from
+# resources/group_vars/all.yml.
+
+- name: Converge
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    # The repository has to exist before the test can ask it which releases
+    # exist. The role's own run below configures it again, idempotently.
+    - name: Add the GitLab package repository
+      ansible.builtin.include_role:
+        name: gitlab
+        tasks_from: repository.yml
+
+    - name: Work out which releases this test run uses
+      ansible.builtin.include_tasks: tasks/discover-releases.yml
+
+    - name: Install and configure GitLab
+      ansible.builtin.include_role:
+        name: gitlab
+      vars:
+        gitlab_version: "{{ gitlab_test_initial_version }}"

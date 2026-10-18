@@ -1,0 +1,63 @@
+---
+# A GitLab backup is two separate things, and a restore needs both:
+#
+#   * the data tarball — repositories, database, uploads, artifacts — written
+#     by `gitlab-backup create` into {{ gitlab_backup_path }};
+#   * the configuration backup — /etc/gitlab, which holds gitlab-secrets.json
+#     — written by `gitlab-ctl backup-etc` into {{ gitlab_backup_config_path }}.
+#
+# Without the secrets file the database restores but everything encrypted with
+# it (CI/CD variables, access tokens, 2FA secrets, integration credentials)
+# stays unreadable, so a data-only backup is not a backup of this instance.
+#
+# This file manages the destinations and the schedule. tasks/backup-create.yml
+# takes a backup now.
+
+- name: "ALL | Ensure both backup destinations exist"
+  ansible.builtin.include_tasks: backup-dirs.yml
+
+# CRON=1 keeps the job quiet unless something goes wrong, so cron only mails
+# you about a backup that failed.
+- name: "ALL | Ensure the nightly GitLab data backup is scheduled"
+  ansible.builtin.cron:
+    name: "GitLab data backup"
+    cron_file: "gitlab-backup"
+    user: root
+    minute: "{{ gitlab_backup_minute }}"
+    hour: "{{ gitlab_backup_hour }}"
+    day: "{{ gitlab_backup_day }}"
+    month: "{{ gitlab_backup_month }}"
+    weekday: "{{ gitlab_backup_weekday }}"
+    job: "{{ ([gitlab_backup_command, 'create'] + gitlab_backup_arguments) | join(' ') }}"
+    state: "{{ 'present' if gitlab_backup_schedule_enabled | bool else 'absent' }}"
+  become: true
+
+- name: "ALL | Ensure the GitLab configuration and secrets are backed up on a schedule"
+  ansible.builtin.cron:
+    name: "GitLab configuration backup"
+    cron_file: "gitlab-backup-config"
+    user: root
+    minute: "{{ gitlab_backup_config_minute }}"
+    hour: "{{ gitlab_backup_config_hour }}"
+    day: "{{ gitlab_backup_day }}"
+    month: "{{ gitlab_backup_month }}"
+    weekday: "{{ gitlab_backup_weekday }}"
+    job: "{{ gitlab_ctl_command }} backup-etc --backup-path {{ gitlab_backup_config_path }}"
+    state: "{{ 'present' if gitlab_backup_schedule_enabled | bool else 'absent' }}"
+  become: true
+
+# GitLab prunes its own data tarballs on gitlab_rails['backup_keep_time'], but
+# nothing prunes the configuration backups — they accumulate until the
+# filesystem fills.
+- name: "ALL | Ensure old GitLab configuration backups are pruned"
+  ansible.builtin.cron:
+    name: "GitLab configuration backup retention"
+    cron_file: "gitlab-backup-config"
+    user: root
+    minute: "30"
+    hour: "{{ gitlab_backup_config_hour }}"
+    job: >-
+      find {{ gitlab_backup_config_path }} -maxdepth 1 -type f -name 'gitlab_config_*.tar'
+      -mtime +{{ gitlab_backup_config_keep_days | int }} -delete
+    state: "{{ 'present' if gitlab_backup_schedule_enabled | bool else 'absent' }}"
+  become: true

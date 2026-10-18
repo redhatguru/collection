@@ -1,0 +1,108 @@
+---
+# Worked example for the gitlab role.
+#
+# The two values that genuinely have to be set for a working instance are the
+# external URL and the root password — there is no safe default for either.
+# Everything else below is here because it is what you tend to want to think
+# about once, at install time.
+
+# --------------------------------------------------------------------------
+# Release
+# --------------------------------------------------------------------------
+
+# Pin this. Left empty the role installs whatever the repository calls newest,
+# so two runs weeks apart install different versions — and an upgrade refuses
+# to run unpinned. Check the release you want against
+# <https://docs.gitlab.com/update/upgrade_paths/> before raising it.
+gitlab_version: "19.5.0-ce.0"
+gitlab_edition: "ce"
+
+# --------------------------------------------------------------------------
+# Identity
+# --------------------------------------------------------------------------
+
+# Every clone URL, email link and OAuth redirect GitLab hands out is built
+# from this, and changing it after the first reconfigure invalidates all of
+# them. The name has to resolve on the host itself — the role's preflight
+# checks that.
+gitlab_external_url: "https://gitlab.example.com"
+
+gitlab_time_zone: "Europe/Amsterdam"
+
+# Applied on the first reconfigure only. Keep it in Ansible Vault:
+#   ansible-vault encrypt_string --name vault_gitlab_root_password '<value>'
+# gitlab_initial_root_password: "{{ vault_gitlab_root_password }}"
+
+# --------------------------------------------------------------------------
+# http or https
+# --------------------------------------------------------------------------
+#
+# The scheme of gitlab_external_url above decides. Over https, this says where
+# the certificate comes from: "file" (the paths below), "self-signed" (the
+# role generates one — the only option for a name or an IP no public CA will
+# certify) or "letsencrypt" (GitLab issues and renews it, which needs a public
+# name and port 80 reachable from the internet).
+
+gitlab_tls_certificate_source: "file"
+
+gitlab_nginx_ssl_certificate: "/etc/gitlab/ssl/gitlab.example.com.crt"
+gitlab_nginx_ssl_certificate_key: "/etc/gitlab/ssl/gitlab.example.com.key"
+
+# With gitlab_tls_certificate_source: "self-signed", drop the two paths above
+# and optionally add the other names clients use:
+# gitlab_tls_self_signed_extra_sans:
+#   - "DNS:gitlab.internal.example"
+
+# With gitlab_tls_certificate_source: "letsencrypt":
+# gitlab_letsencrypt_contact_emails:
+#   - "ops@example.com"
+
+# --------------------------------------------------------------------------
+# Email — without this, password resets and notifications go nowhere
+# --------------------------------------------------------------------------
+
+gitlab_smtp_enabled: false
+# gitlab_smtp_address: "smtp.example.com"
+# gitlab_smtp_port: 587
+# gitlab_smtp_user_name: "gitlab@example.com"
+# gitlab_smtp_password: "{{ vault_gitlab_smtp_password }}"
+# gitlab_email_from: "gitlab@example.com"
+
+# --------------------------------------------------------------------------
+# Backups — both halves, and off this host
+# --------------------------------------------------------------------------
+
+gitlab_backup_enabled: true
+gitlab_backup_hour: "2"
+gitlab_backup_keep_time: 604800
+gitlab_backup_config_keep_days: 7
+
+# The archives are only proof against this host failing once they are copied
+# off it. Either let GitLab upload them, or make sure whatever backs up the
+# rest of your estate collects /var/opt/gitlab/backups and
+# /etc/gitlab/config_backup.
+# gitlab_backup_upload_connection:
+#   provider: AWS
+#   region: eu-west-1
+#   aws_access_key_id: "{{ vault_gitlab_backup_key_id }}"
+#   aws_secret_access_key: "{{ vault_gitlab_backup_secret }}"
+# gitlab_backup_upload_remote_directory: "gitlab-backups"
+
+# --------------------------------------------------------------------------
+# Sizing — these defaults suit the 4 vCPU / 4 GB minimum
+# --------------------------------------------------------------------------
+
+gitlab_puma_worker_processes: 2
+gitlab_sidekiq_max_concurrency: 10
+gitlab_postgresql_shared_buffers: "512MB"
+
+# --------------------------------------------------------------------------
+# Optional components
+# --------------------------------------------------------------------------
+
+gitlab_registry_enabled: false
+# gitlab_registry_external_url: "https://registry.example.com"
+
+gitlab_pages_enabled: false
+gitlab_mattermost_enabled: false
+gitlab_prometheus_enabled: true

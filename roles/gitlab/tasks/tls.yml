@@ -1,0 +1,85 @@
+---
+# Generates the certificate for the "self-signed" source. Only reached when
+# nginx terminates TLS and gitlab_tls_certificate_source is self-signed; the
+# "file" source is the caller's own files, and "letsencrypt" is GitLab's job.
+#
+# This runs before gitlab.rb is written, because nginx refuses to start
+# without the certificate the configuration points it at — so on a first
+# install the files have to exist before the first reconfigure, not after it.
+#
+# A self-signed certificate is a deliberate choice, not a fallback: it is the
+# only way to have TLS on a name no public CA will certify (an IP address, a
+# .local name, an instance with no route from the internet). Clients warn
+# until it is trusted, and git refuses to clone until it is — distribute it,
+# or point http.sslCAInfo at it.
+
+- name: "DEBIAN | Ensure the library the certificate modules need is installed"
+  ansible.builtin.apt:
+    name: python3-cryptography
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+# Created only when absent, and never adjusted afterwards, for the same reason
+# as /etc/gitlab in os.yml: `gitlab-ctl reconfigure` manages this directory
+# too, and a task that enforced a mode here would flap against it. The private
+# key's own permissions are enforced below, which is what matters.
+- name: "ALL | Check whether the GitLab certificate directory exists"
+  ansible.builtin.stat:
+    path: "{{ gitlab_tls_self_signed_dir }}"
+  become: true
+  register: gitlab_tls_dir_state
+
+- name: "ALL | Ensure the GitLab certificate directory exists"
+  ansible.builtin.file:
+    path: "{{ gitlab_tls_self_signed_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: not gitlab_tls_dir_state.stat.exists
+
+- name: "ALL | Ensure the private key for the self-signed certificate exists"
+  community.crypto.openssl_privatekey:
+    path: "{{ gitlab_tls_self_signed_key }}"
+    size: "{{ gitlab_tls_self_signed_key_size | int }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+
+# The signing request carries the subject and the subject alternative names,
+# and the certificate below is checked against it — so changing the external
+# URL regenerates the certificate instead of leaving a stale one in place.
+- name: "ALL | Ensure the signing request matches the external URL"
+  community.crypto.openssl_csr:
+    path: "{{ gitlab_tls_self_signed_csr }}"
+    privatekey_path: "{{ gitlab_tls_self_signed_key }}"
+    common_name: "{{ gitlab_external_url_host }}"
+    subject_alt_name: "{{ gitlab_tls_self_signed_subject_alt_name }}"
+    basic_constraints:
+      - "CA:FALSE"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - serverAuth
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: "ALL | Ensure the self-signed certificate exists and matches the request"
+  community.crypto.x509_certificate:
+    path: "{{ gitlab_tls_self_signed_certificate }}"
+    privatekey_path: "{{ gitlab_tls_self_signed_key }}"
+    csr_path: "{{ gitlab_tls_self_signed_csr }}"
+    provider: selfsigned
+    selfsigned_not_after: "+{{ gitlab_tls_self_signed_days | int }}d"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: "ALL | Restart nginx so it serves the current certificate"

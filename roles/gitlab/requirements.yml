@@ -1,0 +1,11 @@
+---
+collections:
+  # community.crypto  — openssl_privatekey, openssl_csr, x509_certificate
+  #                     (the "self-signed" TLS certificate source)
+  # community.general — version_sort, used by the Molecule scenario to resolve
+  #                     which GitLab releases to test against
+  # ansible.posix     — mount, used by the Molecule scenario to give the test
+  #                     VM the swap GitLab's requirements ask for
+  - name: community.crypto
+  - name: community.general
+  - name: ansible.posix

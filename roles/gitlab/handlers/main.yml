@@ -1,0 +1,26 @@
+---
+# `gitlab-ctl reconfigure` is the only supported way to apply gitlab.rb: it
+# renders every bundled service's configuration from it, runs the database
+# migrations a new release needs, and restarts what it has to. It takes
+# several minutes on a first install.
+#
+# It is a handler so that a run which changes nothing leaves GitLab alone, and
+# so that several configuration changes in one run cost one reconfigure. The
+# upgrade path calls the same command directly instead, because there the
+# ordering against the backup and the verification matters.
+- name: "ALL | Reconfigure GitLab so the rendered configuration is applied"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_ctl_command }}", reconfigure]
+  become: true
+  register: gitlab_reconfigure
+  changed_when: true
+
+# Handlers run in the order they are defined here, not in the order they were
+# notified, so a first install reconfigures (which starts nginx) and then
+# restarts it, while a later certificate renewal only restarts nginx — seconds
+# instead of the minutes a reconfigure costs.
+- name: "ALL | Restart nginx so it serves the current certificate"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_ctl_command }}", restart, nginx]
+  become: true
+  changed_when: true

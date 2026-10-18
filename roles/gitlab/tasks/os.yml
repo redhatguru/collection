@@ -1,0 +1,50 @@
+---
+# The Omnibus package bundles its own Ruby, PostgreSQL, Redis and nginx, so
+# there is very little to prepare — only the handful of things it assumes the
+# host already has, and the two files that decide when GitLab reconfigures
+# itself.
+
+- name: "DEBIAN | Ensure the packages the GitLab installer expects are present"
+  ansible.builtin.apt:
+    name: "{{ gitlab_os_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+# Only created when it is absent, and never adjusted afterwards: the Omnibus
+# package owns this directory's permissions and `gitlab-ctl reconfigure` sets
+# them on every run, so a task that enforced a mode here would flap against it
+# for the life of the instance. The role exists to put gitlab.rb in place
+# before the first reconfigure, not to have an opinion about the directory —
+# and what matters inside it (gitlab.rb and gitlab-secrets.json, root-only) is
+# enforced on the files themselves and checked by tasks/validate.yml.
+- name: "ALL | Check whether the GitLab configuration directory exists"
+  ansible.builtin.stat:
+    path: "{{ gitlab_config_dir }}"
+  become: true
+  register: gitlab_config_dir_state
+
+- name: "ALL | Ensure the GitLab configuration directory exists"
+  ansible.builtin.file:
+    path: "{{ gitlab_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: not gitlab_config_dir_state.stat.exists
+
+# Without this file the package's post-install script runs `gitlab-ctl
+# reconfigure` itself, before the role has written gitlab.rb — so a fresh
+# install would come up on the package's default external URL, and an upgrade
+# would reconfigure before the pre-upgrade backup is taken. With it, every
+# reconfigure happens where this role asks for one.
+- name: "ALL | Ensure the package never reconfigures GitLab behind the role's back"
+  ansible.builtin.copy:
+    dest: "{{ gitlab_skip_auto_reconfigure_file }}"
+    content: ""
+    owner: root
+    group: root
+    mode: "0644"
+  become: true

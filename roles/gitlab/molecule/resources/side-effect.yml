@@ -1,0 +1,54 @@
+---
+# Exercises the two things a GitLab instance has to survive after it is
+# installed: a backup taken on demand, and an upgrade to a newer release.
+#
+# Both run through the role's own entry points rather than through
+# reimplementations of them, which is the point — this is what an operator
+# runs, and verify.yml then looks at what it left behind.
+
+- name: Back the instance up on demand
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Take a backup of the running instance
+      ansible.builtin.include_role:
+        name: gitlab
+        tasks_from: backup-create.yml
+
+    # Handed to verify.yml as JSON rather than as a list of lines: a newline
+    # escape inside a folded YAML scalar reaches Jinja as a literal
+    # backslash-n, so reading it back would depend on which quoting style the
+    # reader happened to use.
+    - name: Remember which archives the on-demand backup wrote
+      ansible.builtin.copy:
+        dest: /var/tmp/molecule-backup-archives.json
+        content: "{{ gitlab_backup_new_archives | to_json }}"
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+
+- name: Upgrade the instance to the next release
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Work out which releases this test run uses
+      ansible.builtin.include_tasks: tasks/discover-releases.yml
+
+    - name: Upgrade GitLab
+      ansible.builtin.include_role:
+        name: gitlab
+        tasks_from: upgrade.yml
+      vars:
+        gitlab_upgrade_enabled: true
+        gitlab_version: "{{ gitlab_test_target_version }}"
+        # The two releases the test picked are adjacent within one major
+        # version, so the role's upgrade-path check passes on its own. It only
+        # needs overriding in the rare window where the newest release in the
+        # repository is the first of a new major and nothing below it shares
+        # that major.
+        gitlab_upgrade_allow_path_skip: >-
+          {{ (gitlab_test_target_version | split('.') | first)
+             != (gitlab_test_initial_version | split('.') | first) }}
