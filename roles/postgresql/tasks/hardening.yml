@@ -1,22 +1,22 @@
 ---
 # Configure pg_hba.conf
-- name: Configure pg_hba.conf
+- name: "ALL | Configure pg_hba.conf"
   ansible.builtin.lineinfile:
     dest: "{{ postgresql_hba }}"
     line: 'host    all          all            {{ postgresql_allow_subnet }}  md5'
     state: present
-  notify: Restart postgresql
+  notify: "ALL | Restart postgresql"
 
-- name: Set listen_adressess
+- name: "ALL | Set listen_adressess"
   ansible.builtin.lineinfile:
     dest: "{{ postgresql_conf }}"
     regexp: '^#listen_addresses\s*='
     line: "listen_addresses = '*'"
     state: present
     backup: true
-  notify: Restart postgresql
+  notify: "ALL | Restart postgresql"
 
-- name: Set password for postgres database user
+- name: "ALL | Set password for postgres database user"
   become: true
   become_user: postgres
   community.general.postgresql_user:

@@ -21,6 +21,10 @@ k3s_preflight_min_disk_free_mb: 4096
 k3s_firewall_enabled: true
 k3s_hardening_enabled: true
 
+# Generous, because pulling the add-on images from quay.io on the test host has
+# been observed to take minutes per image. The role's own default is 600.
+k3s_wait_timeout: 1800
+
 k3s_metallb_enabled: true
 k3s_metallb_address_pools:
   - name: default
@@ -29,6 +33,16 @@ k3s_metallb_address_pools:
 
 k3s_traefik_enabled: true
 k3s_traefik_loadbalancer_ip: "{{ k3s_test_subnet_prefix }}.100"
+
+# Off for the test only. The HTTP-to-HTTPS redirect is an *entrypoint*-level
+# redirect, so with it on every request to port 80 gets a 308 before routing is
+# considered at all — an unknown hostname included. Nothing about hostname
+# routing can then be proven over HTTP, and proving it over HTTPS would mean
+# disabling certificate verification for Traefik's self-signed default
+# certificate, which these tests will not do. The role's own default stays
+# true; this override is what makes the end-to-end assertions in verify.yml
+# mean something.
+k3s_traefik_http_redirect_enabled: false
 
 k3s_validate_ingress_hosts:
   - host: hello.example.local

@@ -1,12 +1,12 @@
 ---
-- name: Ensure the AWX Operator kustomize directory exists
+- name: "ALL | Ensure the AWX Operator kustomize directory exists"
   ansible.builtin.file:
     path: /etc/kubernetes/awx-operator-kustomize
     state: directory
     mode: "0755"
   become: true
 
-- name: Template the AWX Operator kustomization
+- name: "ALL | Template the AWX Operator kustomization"
   ansible.builtin.template:
     src: operator-kustomization.yaml.j2
     dest: /etc/kubernetes/awx-operator-kustomize/kustomization.yaml
@@ -16,7 +16,7 @@
 # kubernetes.core.k8s has no kustomize support (it applies plain resource
 # definitions, not a kustomization.yaml directory), so this step is the
 # one place in this role that still shells out to kubectl.
-- name: Install the AWX Operator
+- name: "ALL | Install the AWX Operator"
   ansible.builtin.command: kubectl apply -k /etc/kubernetes/awx-operator-kustomize
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
@@ -27,7 +27,7 @@
   delay: 10
   until: awx_operator_apply.rc == 0
 
-- name: Wait for the AWX Operator controller-manager to become available
+- name: "ALL | Wait for the AWX Operator controller-manager to become available"
   kubernetes.core.k8s:
     kubeconfig: /etc/kubernetes/admin.conf
     api_version: apps/v1

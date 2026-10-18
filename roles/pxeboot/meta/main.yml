@@ -5,7 +5,8 @@ galaxy_info:
   author: redhatguru
   description: >-
     Sets up a PXE network boot server (proxy-DHCP + TFTP, via dnsmasq)
-    with a Memtest86+ boot menu entry for BIOS and UEFI clients.
+    with a Memtest86+ boot menu entry for BIOS and UEFI clients, and an
+    HTTP mirror (nginx) of the same tree for fast installer downloads.
   license: GPL-2.0-or-later
   min_ansible_version: "2.15"
   platforms:
@@ -23,5 +24,7 @@ galaxy_info:
     - dnsmasq
     - memtest
     - networking
+    - http
+    - nginx
 
 dependencies: []

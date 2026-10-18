@@ -1,5 +1,5 @@
 ---
-- name: Ensure dnsmasq and the PXELINUX bootloader packages are installed
+- name: "RHEL | Ensure dnsmasq and the PXELINUX bootloader packages are installed"
   # syslinux-tftpboot is a pre-arranged, ready-to-serve TFTP tree (AppStream,
   # enabled by default on Rocky Linux 9 — no EPEL/CRB needed) containing
   # pxelinux.0 and the .c32 modules directly under /tftpboot.
@@ -10,7 +10,7 @@
     state: present
   become: true
 
-- name: Ensure the TFTP root and its subdirectories exist
+- name: "RHEL | Ensure the TFTP root and its subdirectories exist"
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -22,7 +22,7 @@
     - "{{ pxeboot_tftp_root }}/images/operating-systems"
     - "{{ pxeboot_tftp_root }}/images/troubleshooting/memtest"
 
-- name: Copy the PXELINUX bootloader and menu modules into the TFTP root
+- name: "RHEL | Copy the PXELINUX bootloader and menu modules into the TFTP root"
   ansible.builtin.copy:
     src: "/tftpboot/{{ item }}"
     dest: "{{ pxeboot_tftp_root }}/{{ item }}"

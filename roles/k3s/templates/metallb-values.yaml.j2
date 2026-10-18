@@ -34,9 +34,8 @@ speaker:
       effect: NoSchedule
 {% endif %}
   frr:
-    # Layer 2 and MetalLB's native BGP speaker both work without FRR; FRR is
-    # only needed for BFD and for multi-protocol BGP.
-    enabled: false
+    # The legacy in-speaker FRR sidecar.
+    enabled: {{ k3s_metallb_frr_enabled | bool | lower }}
   resources:
     requests:
       cpu: "50m"
@@ -44,6 +43,12 @@ speaker:
     limits:
       cpu: "200m"
       memory: "128Mi"
+
+# Stated explicitly because the chart defaults this to true: left alone it
+# deploys an frr-k8s DaemonSet and a status cleaner, and pulls two further
+# container images, for BGP machinery that layer-2 mode never uses.
+frrk8s:
+  enabled: {{ k3s_metallb_frr_enabled | bool | lower }}
 {% if k3s_metallb_extra_values | length > 0 %}
 
 {{ k3s_metallb_extra_values | to_nice_yaml(indent=2) | trim }}

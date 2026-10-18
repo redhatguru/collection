@@ -2,12 +2,21 @@
 # Runs once, on the bootstrap node, which is the only host that is guaranteed
 # to have both a kubeconfig and Helm.
 
+# Retried, because registering a chart repository is a plain network read and
+# a slow link makes Helm give up on it. Deliberately not applied to the release
+# task below: the MetalLB install in this role's own test run once timed out
+# because of a real configuration error, and retrying a long --wait would have
+# hidden that instead of surfacing it.
 - name: "ALL | Ensure the MetalLB chart repository is known to Helm"
   kubernetes.core.helm_repository:
     name: "{{ k3s_metallb_chart_repo_name }}"
     repo_url: "{{ k3s_metallb_chart_repo_url }}"
     binary_path: "{{ k3s_helm_binary }}"
   become: true
+  register: k3s_metallb_repo
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_metallb_repo is not failed
 
 - name: "ALL | Ensure the MetalLB Helm values are on the bootstrap node"
   ansible.builtin.template:

@@ -26,6 +26,10 @@
     group: root
     mode: "0700"
   become: true
+  register: k3s_install_script
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_install_script is not failed
   when: not k3s_unit_file.stat.exists
 
 # Runs once per node, guarded by the unit file it creates. With

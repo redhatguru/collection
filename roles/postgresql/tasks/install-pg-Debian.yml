@@ -1,6 +1,6 @@
 ---
 # tasks for install and create postgress database
-- name: Install prerequisite packages
+- name: "DEBIAN | Install prerequisite packages"
   ansible.builtin.apt:
     name:
       - gnupg
@@ -11,21 +11,21 @@
     update_cache: true
   become: true
 
-- name: Ensure apt keyrings directory exists
+- name: "DEBIAN | Ensure apt keyrings directory exists"
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
     mode: '0755'
   become: true
 
-- name: Add PostgreSQL apt signing key
+- name: "DEBIAN | Add PostgreSQL apt signing key"
   ansible.builtin.get_url:
     url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
     dest: /etc/apt/keyrings/postgresql.asc
     mode: '0644'
   become: true
 
-- name: Add PostgreSQL apt repository
+- name: "DEBIAN | Add PostgreSQL apt repository"
   ansible.builtin.apt_repository:
     repo: >-
       deb [signed-by=/etc/apt/keyrings/postgresql.asc]
@@ -35,7 +35,7 @@
     state: present
   become: true
 
-- name: Install PostgreSQL {{ postgresql_version }}
+- name: "DEBIAN | Install PostgreSQL {{ postgresql_version }}"
   ansible.builtin.apt:
     name:
       - "postgresql-{{ postgresql_version }}"
@@ -44,7 +44,7 @@
     update_cache: true
   become: true
 
-- name: Open ufw port for PostgreSQL
+- name: "DEBIAN | Open ufw port for PostgreSQL"
   community.general.ufw:
     rule: allow
     port: "{{ postgresql_port }}"
@@ -53,7 +53,7 @@
   become: true
   when: ansible_facts['virtualization_type'] != 'docker'
 
-- name: Ensure PostgreSQL service is running
+- name: "DEBIAN | Ensure PostgreSQL service is running"
   ansible.builtin.service:
     name: postgresql
     state: started

@@ -1,30 +1,30 @@
 ---
-- name: Install Postgress
+- name: "ALL | Install Postgress"
   ansible.builtin.import_tasks:
     file: install-pg.yml
   tags: install
 
-- name: Create Postgress Database
+- name: "ALL | Create Postgress Database"
   ansible.builtin.import_tasks:
     file: createdb-pg.yml
   tags: createdb
 
-- name: Create Postgres Users
+- name: "ALL | Create Postgres Users"
   ansible.builtin.import_tasks:
     file: createusr-pg.yml
   tags: createusr
 
-- name: Harden Postgres
+- name: "ALL | Harden Postgres"
   ansible.builtin.import_tasks:
     file: hardening.yml
   tags: hardening
 
-- name: Configure automatic PostgreSQL backups
+- name: "ALL | Configure automatic PostgreSQL backups"
   ansible.builtin.import_tasks:
     file: backup.yml
   tags: backup
 
-- name: Print database report
+- name: "ALL | Print database report"
   ansible.builtin.import_tasks:
     file: report.yml
   tags: report

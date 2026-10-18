@@ -45,8 +45,8 @@
   ansible.builtin.set_fact:
     k3s_upgrade_needed: >-
       {{ (k3s_upgrade_current_output.stdout | default('')
-          | regex_search('k3s version (v[0-9.]+\+k3s[0-9]+)', '\1')
-          | first | default('')) != k3s_release }}
+          | regex_search('v[0-9]+[.][0-9]+[.][0-9]+[+]k3s[0-9]+')
+          | default('', true)) != k3s_release }}
 
 - name: "ALL | Take an etcd snapshot before touching this control-plane node"
   ansible.builtin.command:

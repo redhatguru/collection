@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+#
+# Serves pxeboot_tftp_root over HTTP too, so kickstart/preseed installs
+# can pull install trees over one TCP connection instead of TFTP's slow,
+# ack-per-block transfers. Replaces the distribution's stock nginx.conf
+# entirely so this role doesn't have to reconcile its own default server
+# with the vendor one (RHEL's lives inline in nginx.conf, Debian's is a
+# separate sites-enabled/default) — this is the only server block nginx
+# runs.
+
+user {{ 'nginx' if ansible_facts['os_family'] == 'RedHat' else 'www-data' }};
+worker_processes auto;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+
+    server {
+        listen {{ pxeboot_http_port }} default_server;
+        server_name _;
+        root {{ pxeboot_tftp_root }};
+        autoindex on;
+    }
+}

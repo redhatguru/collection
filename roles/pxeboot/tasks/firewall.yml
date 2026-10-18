@@ -1,10 +1,15 @@
 ---
-- name: Determine which UDP ports need to be opened
+- name: "ALL | Determine which UDP ports need to be opened"
   ansible.builtin.set_fact:
     pxeboot_firewall_udp_ports: >-
       {{ ['69'] + (['67', '4011'] if pxeboot_dhcp_proxy_enabled | bool else []) }}
 
-- name: Allow TFTP (and DHCP-proxy, if enabled) traffic through ufw
+- name: "ALL | Determine which TCP ports need to be opened"
+  ansible.builtin.set_fact:
+    pxeboot_firewall_tcp_ports: >-
+      {{ [pxeboot_http_port | string] if pxeboot_http_enabled | bool else [] }}
+
+- name: "DEBIAN | Allow TFTP (and DHCP-proxy, if enabled) traffic through ufw"
   community.general.ufw:
     rule: allow
     port: "{{ item }}"
@@ -13,14 +18,23 @@
   loop: "{{ pxeboot_firewall_udp_ports }}"
   when: ansible_facts['os_family'] == 'Debian'
 
-- name: Ensure firewalld is installed and running
+- name: "DEBIAN | Allow HTTP traffic through ufw"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  become: true
+  loop: "{{ pxeboot_firewall_tcp_ports }}"
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Ensure firewalld is installed and running"
   ansible.builtin.package:
     name: firewalld
     state: present
   become: true
   when: ansible_facts['os_family'] == 'RedHat'
 
-- name: Ensure firewalld is enabled and running
+- name: "RHEL | Ensure firewalld is enabled and running"
   ansible.builtin.systemd:
     name: firewalld
     state: started
@@ -28,7 +42,7 @@
   become: true
   when: ansible_facts['os_family'] == 'RedHat'
 
-- name: Allow TFTP (and DHCP-proxy, if enabled) traffic through firewalld
+- name: "RHEL | Allow TFTP (and DHCP-proxy, if enabled) traffic through firewalld"
   ansible.posix.firewalld:
     port: "{{ item }}/udp"
     permanent: true
@@ -36,4 +50,14 @@
     state: enabled
   become: true
   loop: "{{ pxeboot_firewall_udp_ports }}"
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "RHEL | Allow HTTP traffic through firewalld"
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ pxeboot_firewall_tcp_ports }}"
   when: ansible_facts['os_family'] == 'RedHat'

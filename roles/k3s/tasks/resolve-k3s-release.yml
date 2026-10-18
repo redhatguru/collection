@@ -8,6 +8,9 @@
     follow_redirects: none
     status_code: [301, 302]
   register: k3s_channel_response
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_channel_response is not failed
   changed_when: false
   run_once: true
   delegate_to: "{{ k3s_init_host }}"

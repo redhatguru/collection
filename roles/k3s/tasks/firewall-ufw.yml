@@ -156,6 +156,9 @@
   become: true
   when: k3s_firewall_manage_state | bool
 
+# Enabling ufw rebuilds the entire ruleset, which can drop a DNS query that was
+# in flight at that moment — the downloads that follow therefore retry (see
+# k3s_download_retries).
 - name: "DEBIAN | Ensure ufw is enabled"
   community.general.ufw:
     state: enabled

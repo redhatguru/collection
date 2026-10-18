@@ -1,25 +1,30 @@
 ---
-- name: Ensure required variables are set
+- name: "ALL | Ensure required variables are set"
   ansible.builtin.include_tasks: prerequisites.yml
   tags: prerequisites
 
-- name: Install the PXE boot server packages and stage the bootloader
+- name: "ALL | Install the PXE boot server packages and stage the bootloader"
   ansible.builtin.include_tasks: "install-{{ ansible_facts['os_family'] }}.yml"
   tags: install
 
-- name: Fetch and stage the Memtest86+ boot images
+- name: "ALL | Fetch and stage the Memtest86+ boot images"
   ansible.builtin.include_tasks: memtest.yml
   tags: memtest
 
-- name: Configure and start dnsmasq (proxy-DHCP + TFTP)
+- name: "ALL | Configure and start dnsmasq (proxy-DHCP + TFTP)"
   ansible.builtin.include_tasks: dnsmasq.yml
   tags: dnsmasq
 
-- name: Open the firewall for PXE/TFTP traffic
+- name: "ALL | Serve the TFTP root over HTTP for fast installer-tree downloads"
+  ansible.builtin.include_tasks: http.yml
+  tags: http
+  when: pxeboot_http_enabled | bool
+
+- name: "ALL | Open the firewall for PXE/TFTP/HTTP traffic"
   ansible.builtin.include_tasks: firewall.yml
   tags: firewall
   when: pxeboot_firewall_enabled | bool
 
-- name: Print the PXE boot server report
+- name: "ALL | Print the PXE boot server report"
   ansible.builtin.include_tasks: report.yml
   tags: report

@@ -41,6 +41,27 @@
         argv: [cmp, /tmp/pxelinux.0.fetched, /var/lib/tftpboot/pxelinux.0]
       changed_when: false
 
+    - name: Check nginx is active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, nginx]
+      register: pxeboot_verify_nginx
+      changed_when: false
+
+    - name: Assert nginx is active
+      ansible.builtin.assert:
+        that: pxeboot_verify_nginx.stdout == "active"
+
+    - name: Fetch pxelinux.0 over real HTTP from this host's own PXE server
+      ansible.builtin.get_url:
+        url: "http://{{ pxeboot_test_ip }}/pxelinux.0"
+        dest: /tmp/pxelinux.0.http.fetched
+        mode: "0644"
+
+    - name: Compare the HTTP-fetched file against the one the role staged
+      ansible.builtin.command:
+        argv: [cmp, /tmp/pxelinux.0.http.fetched, /var/lib/tftpboot/pxelinux.0]
+      changed_when: false
+
     - name: Check the Memtest86+ BIOS and UEFI boot images
       ansible.builtin.stat:
         path: "/var/lib/tftpboot/images/troubleshooting/memtest/{{ item }}"

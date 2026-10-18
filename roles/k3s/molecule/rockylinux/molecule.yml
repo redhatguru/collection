@@ -36,16 +36,7 @@ provisioner:
   inventory:
     links:
       group_vars: ../resources/group_vars
-    host_vars:
-      k8s-rocky-single:
-        k3s_test_subnet_prefix: "10.10.22"
-        # cert-manager is covered by the two single-node scenarios; the HA
-        # scenario leaves it out to keep three VMs within reach.
-        k3s_cert_manager_enabled: true
-        k3s_cert_manager_issuers:
-          - name: internal-ca
-            type: ca
-            ca_common_name: "Molecule Root CA"
+      host_vars: ../resources/host_vars
 verifier:
   name: ansible
 ansible:

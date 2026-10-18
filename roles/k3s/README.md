@@ -366,6 +366,13 @@ Pools and advertisements are written into K3s' auto-deploying manifests
 directory, so they are reconciled on every K3s start and removing them from the
 inventory removes them from the cluster.
 
+`k3s_metallb_frr_enabled` is `false`, and stated explicitly in the chart values
+rather than left to the chart. The chart defaults it to **true**, which deploys
+an extra `frr-k8s` DaemonSet and status cleaner and pulls two more container
+images — for BGP machinery that layer-2 mode never touches and that MetalLB's
+own native BGP speaker does not need either. Turn it on only for FRR-specific
+features such as BFD or multi-protocol BGP.
+
 10. Traefik
 -----------
 

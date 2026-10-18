@@ -5,7 +5,9 @@ Sets up a PXE network boot server: TFTP via `dnsmasq`, with an optional
 proxy-DHCP service, a PXELINUX boot menu for BIOS clients (categorized
 into "Operating Systems" and "Troubleshooting" submenus), and direct UEFI
 boot support, serving [Memtest86+](https://www.memtest.org/) under
-Troubleshooting as the first boot option.
+Troubleshooting as the first boot option. The same tree is also served
+over HTTP (via nginx) so installer kickstart/preseed configs can pull
+large install trees quickly — see "Why HTTP, not NFS" below.
 
 Proxy-DHCP (`pxeboot_dhcp_proxy_enabled`, default `true`) never hands out
 IP leases itself — it only answers PXE-specific DHCP requests — so it's
@@ -40,6 +42,23 @@ images/
       memtest.bin              # BIOS (PXELINUX LINUX directive)
       memtest.efi               # UEFI (direct boot, or a future GRUB menu)
 ```
+
+Why HTTP, not NFS
+------------------
+
+Boot files (bootloader, kernel, initrd) still go over TFTP — that's what
+PXE firmware itself speaks, and it's fine for the small number of files
+involved. But once a kickstart/preseed config needs to pull an entire
+install tree, TFTP's small fixed block size and per-block acknowledgement
+make it slow. Both HTTP and NFS solve that; this role uses HTTP because:
+
+- It needs only one TCP port, versus NFS's rpcbind/mountd plus the NFS
+  service ports (more to open through a firewall, some of them
+  dynamically negotiated unless pinned).
+- It's what Anaconda (`inst.repo=http://...`) and Debian's installer
+  expect out of the box, no NFS client support required on the image
+  side beyond what's already there for HTTP.
+- No client-side mount step, no NFS version/security-flavor negotiation.
 
 Requirements
 ------------
@@ -90,9 +109,13 @@ Role Variables
   `https://www.memtest.org/download/v<version>/sha256sum.txt` (the
   `mt86plus_<version>.binaries.zip` entry). The download fails closed if
   they don't match.
+- `pxeboot_http_enabled` (default `true`) — serve `pxeboot_tftp_root`
+  over HTTP too, via nginx. See "Why HTTP, not NFS" above.
+- `pxeboot_http_port` (default `80`) — port the HTTP server listens on.
 - `pxeboot_firewall_enabled` (default `true`) — open the host firewall
-  (`ufw`/`firewalld`) for TFTP (69), and for DHCP-proxy (67, 4011) too
-  when `pxeboot_dhcp_proxy_enabled` is true.
+  (`ufw`/`firewalld`) for TFTP (69), for DHCP-proxy (67, 4011) too when
+  `pxeboot_dhcp_proxy_enabled` is true, and for HTTP (`pxeboot_http_port`)
+  when `pxeboot_http_enabled` is true.
 
 Using your own DHCP server
 ---------------------------
@@ -145,9 +168,10 @@ export ANSIBLE_LIBRARY="$(python3 -c 'import molecule_plugins, os; print(os.path
 molecule test
 ```
 
-Verification downloads `pxelinux.0` back over real TFTP from each VM (not
-just checking the file exists on disk) and diffs it against the source
-file, to confirm the server actually serves what it claims to.
+Verification downloads `pxelinux.0` back over real TFTP, and again over
+real HTTP, from each VM (not just checking the file exists on disk) and
+diffs both against the source file, to confirm the server actually
+serves what it claims to.
 
 Requires Vagrant and VirtualBox installed locally.
 

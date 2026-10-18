@@ -1,12 +1,12 @@
 ---
-- name: Deploy AWX
+- name: "ALL | Deploy AWX"
   kubernetes.core.k8s:
     kubeconfig: /etc/kubernetes/admin.conf
     state: present
     definition: "{{ lookup('ansible.builtin.template', 'awx-instance.yaml.j2') }}"
   become: true
 
-- name: Wait for the AWX Operator to create the AWX deployments
+- name: "ALL | Wait for the AWX Operator to create the AWX deployments"
   # The operator creates "<name>-web"/"<name>-task" asynchronously after
   # the AWX custom resource is applied (and only after the migration job
   # it runs first completes), so existence has to be polled for separately
@@ -26,7 +26,7 @@
     - web
     - task
 
-- name: Wait for the AWX deployments to become available
+- name: "ALL | Wait for the AWX deployments to become available"
   kubernetes.core.k8s:
     kubeconfig: /etc/kubernetes/admin.conf
     api_version: apps/v1

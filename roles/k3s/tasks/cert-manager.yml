@@ -5,6 +5,10 @@
     repo_url: "{{ k3s_cert_manager_chart_repo_url }}"
     binary_path: "{{ k3s_helm_binary }}"
   become: true
+  register: k3s_cert_manager_repo
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_cert_manager_repo is not failed
 
 - name: "ALL | Ensure the cert-manager Helm values are on the bootstrap node"
   ansible.builtin.template:

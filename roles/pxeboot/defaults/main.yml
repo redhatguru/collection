@@ -32,3 +32,13 @@ pxeboot_memtest_checksum: "sha256:7e6c5162cb84ab959aeb9d13c9cfd6976b0dec3b34936b
 
 # Open the host firewall for DHCP-proxy (67, 4011) and TFTP (69) traffic.
 pxeboot_firewall_enabled: true
+
+# Serve pxeboot_tftp_root over HTTP too (via nginx), so kickstart/preseed
+# installs can pull large install trees over one TCP connection instead
+# of TFTP's small, ack-per-block transfers — chosen over NFS since it
+# needs no rpcbind/mountd ports and is what Anaconda/debian-installer
+# expect out of the box.
+pxeboot_http_enabled: true
+
+# Port the HTTP server listens on.
+pxeboot_http_port: 80

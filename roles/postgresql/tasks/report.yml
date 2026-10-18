@@ -1,5 +1,5 @@
 ---
-- name: Print database report
+- name: "ALL | Print database report"
   ansible.builtin.debug:
     msg:
       - "Database: {{ postgresql_database_name }}"

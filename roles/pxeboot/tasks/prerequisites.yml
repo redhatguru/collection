@@ -1,5 +1,5 @@
 ---
-- name: Ensure pxeboot_dhcp_proxy_address is set when the DHCP proxy is enabled
+- name: "ALL | Ensure pxeboot_dhcp_proxy_address is set when the DHCP proxy is enabled"
   ansible.builtin.assert:
     that:
       - pxeboot_dhcp_proxy_address | length > 0

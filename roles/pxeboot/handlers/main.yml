@@ -1,7 +1,14 @@
 ---
-- name: Restart dnsmasq
+- name: "ALL | Restart dnsmasq"
   ansible.builtin.systemd:
     name: dnsmasq
+    state: restarted
+    enabled: true
+  become: true
+
+- name: "ALL | Restart nginx"
+  ansible.builtin.systemd:
+    name: nginx
     state: restarted
     enabled: true
   become: true

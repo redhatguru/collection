@@ -78,17 +78,7 @@ provisioner:
   inventory:
     links:
       group_vars: ../resources/group_vars
-    host_vars:
-      k8s-ha-01:
-        k3s_test_subnet_prefix: "10.10.23"
-      k8s-ha-02:
-        k3s_test_subnet_prefix: "10.10.23"
-      k8s-ha-03:
-        k3s_test_subnet_prefix: "10.10.23"
-      k8s-ha-04:
-        k3s_test_subnet_prefix: "10.10.23"
-        # A worker runs no etcd and no API server.
-        k3s_preflight_min_memory_mb: 900
+      host_vars: ../resources/host_vars
 verifier:
   name: ansible
 ansible:

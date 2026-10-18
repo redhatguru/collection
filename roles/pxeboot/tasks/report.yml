@@ -1,5 +1,5 @@
 ---
-- name: Print the PXE boot server report
+- name: "ALL | Print the PXE boot server report"
   ansible.builtin.debug:
     msg: >-
       {{
@@ -10,6 +10,13 @@
           "UEFI x86_64 clients: boot straight into Memtest86+ " + pxeboot_memtest_version +
             " (no menu yet, only one entry so far)"
         ]
+        +
+        (
+          ['HTTP: enabled, install trees available at http://' + ansible_default_ipv4.address +
+            (':' + pxeboot_http_port | string if pxeboot_http_port != 80 else '') + '/']
+          if pxeboot_http_enabled | bool
+          else ['HTTP: disabled']
+        )
         +
         (
           ['DHCP proxy: enabled, subnet address ' + pxeboot_dhcp_proxy_address]

@@ -105,6 +105,41 @@ imperative label:
     append: true
 ```
 
+### Task naming: OS-family prefix
+
+Every task and handler name starts with which OS family it applies to: `RHEL |` for a task
+that only runs on RHEL-family hosts, `DEBIAN |` for Debian-family-only, or `ALL |` when the
+task runs regardless of OS family (including tasks that aren't OS-specific at all, e.g. a
+Kubernetes API call or a report task). The prefix always comes first, before the rest of the
+declarative sentence:
+
+```yaml
+# RHEL-only (e.g. in an install-RedHat.yml, or gated by an os_family == 'RedHat' when:)
+- name: "RHEL | Ensure firewalld is installed and running"
+  ansible.builtin.package:
+    name: firewalld
+    state: present
+  become: true
+
+# Debian-only (e.g. in an install-Debian.yml, or gated by an os_family == 'Debian' when:)
+- name: "DEBIAN | Allow HTTP traffic through ufw"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  become: true
+
+# Applies regardless of OS family
+- name: "ALL | Print the PXE boot server report"
+  ansible.builtin.debug:
+    msg: "..."
+```
+
+Quote the `name` value when it starts with `RHEL |`/`DEBIAN |`/`ALL |` — YAML parses it fine
+unquoted too (`|` only means block-scalar as the very first character of a value, not mid-string),
+but quoting keeps it visually unambiguous next to that syntax. `notify:` handler references
+must match the handler's full prefixed name exactly.
+
 ### `command`/`shell`
 
 Only use `ansible.builtin.command` or `ansible.builtin.shell` when no dedicated module covers

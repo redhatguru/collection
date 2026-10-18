@@ -14,14 +14,17 @@
 - name: "ALL | Determine whether the installed K3s binary is the requested release"
   ansible.builtin.set_fact:
     k3s_installed_release: >-
-      {{ (k3s_version_output.stdout | default('')
-          | regex_search('k3s version (v[0-9.]+\+k3s[0-9]+)', '\1') | first | default('')) }}
+      {{ k3s_version_output.stdout | default('')
+         | regex_search('v[0-9]+[.][0-9]+[.][0-9]+[+]k3s[0-9]+') | default('', true) }}
 
 - name: "ALL | Fetch the checksums published with this K3s release"
   ansible.builtin.uri:
     url: "{{ k3s_release_url }}/{{ k3s_release | urlencode }}/{{ k3s_checksum_asset }}"
     return_content: true
   register: k3s_checksum_response
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_checksum_response is not failed
   changed_when: false
   when: k3s_installed_release != k3s_release
 
@@ -56,5 +59,8 @@
     mode: "0755"
   become: true
   register: k3s_binary_installed
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_binary_installed is not failed
   notify: "restart k3s"
   when: k3s_installed_release != k3s_release

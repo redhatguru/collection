@@ -366,6 +366,13 @@ k3s_metallb_address_pools: []
 #   - {name: core, peer_asn: 64512, my_asn: 64513, peer_address: 10.10.0.1}
 k3s_metallb_bgp_peers: []
 
+# FRR-K8s. The chart enables this by default, which deploys an extra DaemonSet
+# and pulls two more container images — for BGP machinery that layer-2 mode
+# never touches, and that MetalLB's own native BGP speaker does not need
+# either. Only turn it on for BGP features that genuinely require FRR, such as
+# BFD or multi-protocol BGP.
+k3s_metallb_frr_enabled: false
+
 k3s_metallb_extra_values: {}
 
 # --------------------------------------------------------------------------
@@ -524,6 +531,14 @@ k3s_validate_ingress_hosts: []
 # --------------------------------------------------------------------------
 # General
 # --------------------------------------------------------------------------
+
+# Retries for the downloads this role makes over the internet: the release
+# metadata, the K3s binary, the install script and the Helm archive. Enabling
+# the host firewall rebuilds the whole ruleset, which can drop a DNS query that
+# was in flight, and a CDN is allowed the occasional hiccup — neither should
+# fail a cluster build.
+k3s_download_retries: 5
+k3s_download_delay: 5
 
 # Seconds to wait for readiness (API server, Helm releases, node Ready,
 # drains). Generous, because slow disks make etcd slow to settle.

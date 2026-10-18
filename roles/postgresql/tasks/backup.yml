@@ -1,5 +1,5 @@
 ---
-- name: Ensure the backup directory exists
+- name: "ALL | Ensure the backup directory exists"
   ansible.builtin.file:
     path: "{{ postgresql_backup_dir }}"
     state: directory
@@ -8,7 +8,7 @@
     mode: "0700"
   become: true
 
-- name: Schedule a periodic pg_dump backup
+- name: "ALL | Schedule a periodic pg_dump backup"
   ansible.builtin.cron:
     name: "PostgreSQL backup of {{ postgresql_database_name }}"
     # Written to /etc/cron.d instead of postgres's own crontab: the

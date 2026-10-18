@@ -1,5 +1,5 @@
 ---
-- name: Ensure dnsmasq and the PXELINUX bootloader packages are installed
+- name: "DEBIAN | Ensure dnsmasq and the PXELINUX bootloader packages are installed"
   ansible.builtin.apt:
     name:
       - dnsmasq
@@ -9,7 +9,7 @@
     update_cache: true
   become: true
 
-- name: Ensure the TFTP root and its subdirectories exist
+- name: "DEBIAN | Ensure the TFTP root and its subdirectories exist"
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -21,7 +21,7 @@
     - "{{ pxeboot_tftp_root }}/images/operating-systems"
     - "{{ pxeboot_tftp_root }}/images/troubleshooting/memtest"
 
-- name: Copy the PXELINUX bootloader and menu modules into the TFTP root
+- name: "DEBIAN | Copy the PXELINUX bootloader and menu modules into the TFTP root"
   ansible.builtin.copy:
     src: "{{ item }}"
     dest: "{{ pxeboot_tftp_root }}/{{ item | basename }}"

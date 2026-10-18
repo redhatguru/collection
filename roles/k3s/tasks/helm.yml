@@ -8,6 +8,9 @@
     url: "{{ k3s_helm_latest_version_url }}"
     return_content: true
   register: k3s_helm_latest_response
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_helm_latest_response is not failed
   changed_when: false
   run_once: true
   delegate_to: "{{ k3s_init_host }}"
@@ -33,6 +36,9 @@
     url: "{{ k3s_helm_release_url }}/{{ k3s_helm_archive }}.sha256sum"
     return_content: true
   register: k3s_helm_checksum_response
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_helm_checksum_response is not failed
   changed_when: false
   when: k3s_helm_version_output.stdout | default('') != k3s_helm_release
 
@@ -64,6 +70,10 @@
     group: root
     mode: "0600"
   become: true
+  register: k3s_helm_archive_downloaded
+  retries: "{{ k3s_download_retries | int }}"
+  delay: "{{ k3s_download_delay | int }}"
+  until: k3s_helm_archive_downloaded is not failed
   when: k3s_helm_version_output.stdout | default('') != k3s_helm_release
 
 - name: "ALL | Install the Helm binary"

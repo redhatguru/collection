@@ -158,6 +158,10 @@
   loop: "{{ k3s_validate_ingress_hosts }}"
   loop_control:
     label: "{{ item.host }}{{ item.path | default('/') }}"
+  register: k3s_validate_ingress_response
+  retries: 12
+  delay: 5
+  until: k3s_validate_ingress_response is not failed
   changed_when: false
   when:
     - k3s_traefik_enabled | bool

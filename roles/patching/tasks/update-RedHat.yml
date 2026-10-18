@@ -1,5 +1,5 @@
 ---
-- name: Update all packages
+- name: "RHEL | Update all packages"
   ansible.builtin.dnf:
     name: "*"
     state: latest # noqa package-latest
