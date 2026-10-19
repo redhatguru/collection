@@ -152,13 +152,54 @@ gitlab_nginx_ssl_certificate_key_effective: >-
                  if gitlab_tls_certificate_source == 'file' else '')) }}
 
 # Where GitLab's own nginx actually listens on this host, which is not always
-# what the external URL says: behind a load balancer that terminates TLS the
-# URL is https while GitLab itself serves plain HTTP on port 80. The
-# validation dials these rather than the external URL.
+# what the external URL says: behind a load balancer that terminates TLS, the
+# URL is https while GitLab itself serves plain HTTP. The validation dials
+# these, and the firewall opens them.
+#
+# The port follows gitlab_nginx_listen_port when it is set and the external
+# URL's own port otherwise — which is what Omnibus does, so "https://host:8443"
+# means nginx on 8443, not on 443. Note that listen_https alone does not move
+# the port: GitLab's own reverse-proxy recipe sets listen_port to 80 as well as
+# listen_https to false, and so should you.
 gitlab_local_scheme: "{{ 'https' if gitlab_nginx_listen_https_effective | bool else 'http' }}"
 gitlab_local_port: >-
   {{ gitlab_nginx_listen_port if gitlab_nginx_listen_port | string | length > 0
-     else (443 if gitlab_nginx_listen_https_effective | bool else 80) }}
+     else gitlab_external_url_port }}
+
+# --------------------------------------------------------------------------
+# Host firewall
+# --------------------------------------------------------------------------
+
+gitlab_firewall_package: "ufw"
+
+# Both SSH ports have to be open: the one this play connects over, so enabling
+# the firewall cannot lock the play out of the host it is configuring, and the
+# one GitLab advertises in its SSH clone URLs. They are normally the same
+# port, hence the unique.
+gitlab_firewall_ssh_ports: >-
+  {{ [ansible_port | default(22, true) | int, gitlab_shell_ssh_port | int] | unique }}
+
+# The registry and Pages listen on whatever their own URLs say, which is
+# usually a port of their own (5050 is the convention for the registry).
+gitlab_registry_port: >-
+  {{ gitlab_registry_external_url | urlsplit('port')
+     | default(443 if (gitlab_registry_external_url | urlsplit('scheme')) == 'https' else 80, true) }}
+gitlab_pages_port: >-
+  {{ gitlab_pages_external_url | urlsplit('port')
+     | default(443 if (gitlab_pages_external_url | urlsplit('scheme')) == 'https' else 80, true) }}
+
+# Every port a client has to reach, derived rather than listed: the port nginx
+# serves on, the redirect port when an https instance redirects plain HTTP,
+# and the optional components' own ports. Empty when nginx is disabled, where
+# something in front of this host serves instead and there is nothing here to
+# reach.
+gitlab_firewall_web_ports: >-
+  {{ (([gitlab_local_port | int]
+        + ([gitlab_nginx_redirect_http_to_https_port | int]
+           if (gitlab_tls_enabled | bool and gitlab_nginx_redirect_http_to_https | bool) else [])
+        + ([gitlab_registry_port | int] if gitlab_registry_enabled | bool else [])
+        + ([gitlab_pages_port | int] if gitlab_pages_enabled | bool else []))
+       if gitlab_nginx_enabled | bool else []) | unique | sort }}
 
 # --------------------------------------------------------------------------
 # The requested release, taken apart

@@ -65,6 +65,9 @@ nginx['listen_https'] = {{ rb(gitlab_nginx_listen_https_effective | bool) }}
 nginx['listen_port'] = {{ gitlab_nginx_listen_port | int }}
 {% endif %}
 nginx['redirect_http_to_https'] = {{ rb(gitlab_nginx_redirect_http_to_https | bool and gitlab_nginx_listen_https_effective | bool) }}
+{% if gitlab_nginx_redirect_http_to_https | bool and gitlab_nginx_listen_https_effective | bool %}
+nginx['redirect_http_to_https_port'] = {{ gitlab_nginx_redirect_http_to_https_port | int }}
+{% endif %}
 nginx['client_max_body_size'] = {{ rb(gitlab_nginx_client_max_body_size) }}
 {% if gitlab_nginx_ssl_certificate_effective | trim | length > 0 %}
 {# Either the files the caller manages, or the self-signed pair the role

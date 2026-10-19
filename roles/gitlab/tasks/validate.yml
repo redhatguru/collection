@@ -145,6 +145,45 @@
     quiet: true
   when: gitlab_validate_check_migrations | bool
 
+# The one check that leaves the host. Everything above talks to the loopback
+# interface, which no firewall touches — so without this the role would report
+# a healthy instance that nothing outside the host can reach, which is exactly
+# what a missing firewall rule, a cloud security group or a routing mistake
+# produces.
+- name: "ALL | Check that GitLab's web port is reachable from the controller"
+  ansible.builtin.wait_for:
+    host: "{{ gitlab_validate_reachable_address }}"
+    port: "{{ gitlab_local_port | int }}"
+    timeout: 30
+  delegate_to: localhost
+  become: false
+  register: gitlab_validate_reachable
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_validate_check_reachable | bool
+    - gitlab_nginx_enabled | bool
+
+- name: "ALL | Ensure clients can actually reach GitLab"
+  ansible.builtin.assert:
+    that:
+      - not gitlab_validate_reachable.failed | default(false)
+    fail_msg: >-
+      GitLab answers on its own loopback interface but
+      {{ gitlab_validate_reachable_address }}:{{ gitlab_local_port | trim }} is
+      not reachable from the controller, so no client can reach it either.
+      {{ 'The role manages the firewall, so look beyond the host: a cloud security group, or a router between here and there.'
+         if gitlab_firewall_enabled | bool
+         else 'gitlab_firewall_enabled is false, so start with the host firewall — `sudo ufw status verbose` — and the ports '
+              ~ (gitlab_firewall_web_ports | join(', ')) ~ '.' }}
+      If the controller reaches this host through a bastion that does not
+      carry HTTP, this check cannot work from here: set
+      gitlab_validate_check_reachable to false.
+    quiet: true
+  when:
+    - gitlab_validate_check_reachable | bool
+    - gitlab_nginx_enabled | bool
+
 - name: "ALL | Ensure the GitLab configuration and secrets are readable by root only"
   ansible.builtin.stat:
     path: "{{ item }}"

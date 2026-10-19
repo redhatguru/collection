@@ -153,6 +153,9 @@
     gitlab_nginx_listen_port: ""
     gitlab_nginx_redirect_http_to_https: true
 
+    # The port that redirect listens on, which the firewall opens with it.
+    gitlab_nginx_redirect_http_to_https_port: 80
+
     # The "file" source. The role does not create or copy these — it only
     # points nginx at them.
     gitlab_nginx_ssl_certificate: "/etc/gitlab/ssl/gitlab.example.com.crt"
@@ -190,6 +193,37 @@
     gitlab_letsencrypt_auto_renew_hour: 3
     gitlab_letsencrypt_auto_renew_minute: 30
     gitlab_letsencrypt_auto_renew_day_of_month: "*/7"
+
+    # ----------------------------------------------------------------------
+    # Host firewall — on, with the ports derived from the settings above
+    # ----------------------------------------------------------------------
+    #
+    # ufw is installed, incoming traffic is denied by default, and exactly the
+    # ports this instance serves are opened: whatever nginx listens on
+    # according to the external URL, port 80 as well when an https instance
+    # redirects plain HTTP, the registry and Pages ports when those are on,
+    # and SSH — both the port this play connects over and the one GitLab
+    # advertises for git-over-SSH.
+    #
+    # Turning this off leaves the host's firewall as it is, including a ufw
+    # that is already active and blocking GitLab.
+    gitlab_firewall_enabled: true
+
+    # Also enable ufw and set its default incoming policy, rather than only
+    # adding GitLab's rules to whatever is already there.
+    gitlab_firewall_manage_state: true
+
+    # Empty means anywhere. SSH is allowed before the firewall is enabled, so
+    # turning it on cannot drop the session doing it.
+    gitlab_firewall_ssh_sources: []
+    #  - "10.11.0.0/24"
+
+    # Who may reach the web interface and the registry.
+    gitlab_firewall_http_sources: []
+
+    # Anything else this host serves.
+    gitlab_firewall_extra_tcp_ports: []
+    gitlab_firewall_extra_udp_ports: []
 
     # ----------------------------------------------------------------------
     # Outgoing email
@@ -394,6 +428,13 @@
     # The HTTP checks dial the loopback interface with a Host header, so the
     # certificate will not match the address dialled.
     gitlab_validate_http_validate_certs: false
+
+    # The one check that leaves the host: the controller dials GitLab's web
+    # port, which is what notices a firewall, a security group or a route
+    # leaving a healthy instance unreachable. Switch it off where the
+    # controller reaches this host through a bastion that carries no HTTP.
+    gitlab_validate_check_reachable: true
+    gitlab_validate_reachable_address: "{{ ansible_host | default(inventory_hostname) }}"
 
     # GitLab needs a few minutes after a reconfigure before Puma answers.
     gitlab_validate_retries: 60

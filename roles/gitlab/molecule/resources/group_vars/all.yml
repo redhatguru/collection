@@ -47,3 +47,14 @@ gitlab_backup_skip:
 # migrations take longer.
 gitlab_validate_retries: 90
 gitlab_validate_delay: 10
+
+# The firewall is left at the role's default (on, managing ufw's state) — that
+# is a large part of what this scenario exists to prove: GitLab stays
+# reachable with the firewall enabled, rather than reachable because nothing
+# is filtering.
+#
+# The reachability check has to dial the VM's own address: Vagrant gives
+# Ansible a forwarded 127.0.0.1, and dialling that from the controller would
+# test the controller's own port 80.
+gitlab_test_private_ip: "10.10.31.11"
+gitlab_validate_reachable_address: "{{ gitlab_test_private_ip }}"

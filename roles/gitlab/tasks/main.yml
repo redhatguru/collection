@@ -26,6 +26,14 @@
   ansible.builtin.include_tasks: install.yml
   tags: install
 
+# After the package and before GitLab serves anything: the host gets its
+# firewall before there is a port listening on it, and nothing is mid-download
+# when the ruleset is rebuilt.
+- name: "ALL | Open the host firewall for exactly the ports this instance serves"
+  ansible.builtin.include_tasks: firewall.yml
+  tags: firewall
+  when: gitlab_firewall_enabled | bool
+
 # Before configure.yml on purpose: nginx will not start without the
 # certificate gitlab.rb points it at.
 - name: "ALL | Ensure the self-signed TLS certificate exists"

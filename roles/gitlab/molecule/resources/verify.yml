@@ -225,6 +225,48 @@
           be held, so that unattended-upgrades cannot run a GitLab upgrade on
           its own.
 
+    - name: Check the state of the host firewall
+      ansible.builtin.command:
+        argv: [ufw, status, verbose]
+      become: true
+      register: gitlab_test_ufw
+      changed_when: false
+
+    - name: Assert the firewall is still on and allows exactly what GitLab needs
+      ansible.builtin.assert:
+        that:
+          - "'Status: active' in gitlab_test_ufw.stdout"
+          - "'deny (incoming)' in gitlab_test_ufw.stdout"
+          - "'80/tcp' in gitlab_test_ufw.stdout"
+          - "'22/tcp' in gitlab_test_ufw.stdout"
+          # The instance is http in this scenario, so 443 has no business
+          # being open — the role derives the ports rather than opening both.
+          - "'443' not in gitlab_test_ufw.stdout"
+        fail_msg: "ufw status: {{ gitlab_test_ufw.stdout_lines | join(' | ') }}"
+
+    # From the controller, over the VM's own address: the loopback checks above
+    # would pass even with every port blocked, so this is the one that proves
+    # the firewall lets clients in.
+    - name: Fetch the sign-in page from outside the VM, through the firewall
+      ansible.builtin.uri:
+        url: "http://{{ gitlab_test_private_ip }}/users/sign_in"
+        headers:
+          Host: "{{ gitlab_test_host }}"
+        return_content: true
+        status_code: [200]
+      delegate_to: localhost
+      become: false
+      register: gitlab_test_external_fetch
+      changed_when: false
+
+    - name: Assert the page reached from outside really is GitLab's
+      ansible.builtin.assert:
+        that:
+          - "'GitLab' in gitlab_test_external_fetch.content"
+        fail_msg: >-
+          {{ gitlab_test_private_ip }} answered from the controller, but not
+          with GitLab's sign-in page.
+
     # --------------------------------------------------------------------
     # What the role must refuse
     # --------------------------------------------------------------------

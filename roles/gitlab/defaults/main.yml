@@ -204,6 +204,12 @@ gitlab_nginx_listen_port: ""
 
 gitlab_nginx_redirect_http_to_https: true
 
+# The port the redirect listens on. GitLab's own default, and the firewall
+# opens it when the redirect is on — a redirect nothing can reach is worse
+# than no redirect, because the browser reports a connection failure rather
+# than a wrong scheme.
+gitlab_nginx_redirect_http_to_https_port: 80
+
 # The certificate and key for the "file" source. Paths on the GitLab host, to
 # files you put there yourself. With the "self-signed" source the role fills
 # these in with what it generated; with "letsencrypt" GitLab manages them.
@@ -239,6 +245,42 @@ gitlab_letsencrypt_auto_renew: true
 gitlab_letsencrypt_auto_renew_hour: 3
 gitlab_letsencrypt_auto_renew_minute: 30
 gitlab_letsencrypt_auto_renew_day_of_month: "*/7"
+
+# --------------------------------------------------------------------------
+# Host firewall
+# --------------------------------------------------------------------------
+#
+# The firewall stays on, and the role opens exactly the ports this instance
+# needs: whatever nginx listens on according to the external URL, the redirect
+# port when an https instance redirects plain HTTP, the registry and Pages
+# ports when those are enabled, and SSH.
+#
+# Turning this off leaves the host's firewall exactly as it is — including a
+# ufw that is already active and silently blocking GitLab. The role's own HTTP
+# validation goes over the loopback interface, which a firewall does not
+# touch, so it would pass while no client could reach the instance; the
+# reachability check at the end of tasks/validate.yml is what catches that.
+gitlab_firewall_enabled: true
+
+# Whether the role also enables ufw and sets its default incoming policy to
+# deny, or only adds GitLab's rules to whatever is already there. Set this
+# false where something else owns the firewall's state.
+gitlab_firewall_manage_state: true
+
+# Who may reach SSH. Empty means anywhere. The port this play connects over is
+# allowed before the firewall is enabled, so turning it on can never drop the
+# session doing it, and the port GitLab advertises for git-over-SSH is allowed
+# too — it is the same sshd, and `git clone git@...` needs it.
+gitlab_firewall_ssh_sources: []
+
+# Who may reach the web interface and the container registry. Empty means
+# anywhere, which is what an instance people clone from usually needs; narrow
+# it to your own networks for one only your estate uses.
+gitlab_firewall_http_sources: []
+
+# Anything else this host serves.
+gitlab_firewall_extra_tcp_ports: []
+gitlab_firewall_extra_udp_ports: []
 
 # --------------------------------------------------------------------------
 # Outgoing email
@@ -446,6 +488,22 @@ gitlab_validate_check_services: true
 gitlab_validate_check_version: true
 gitlab_validate_check_http: true
 gitlab_validate_check_migrations: true
+
+# Dial GitLab's web port from the controller rather than over the host's own
+# loopback interface. This is the only check that notices a firewall, a cloud
+# security group or a routing rule between clients and the instance — the
+# other HTTP checks deliberately avoid the network to stay independent of DNS
+# and certificate names, and so would pass while nobody could reach GitLab.
+#
+# Switch it off where the controller reaches this host through a bastion that
+# does not carry HTTP, which is the one case where it fails without anything
+# being wrong.
+gitlab_validate_check_reachable: true
+
+# The address the controller dials for that check. The address Ansible already
+# connects over is right everywhere except behind port forwarding (Vagrant,
+# for instance), where 127.0.0.1 would test the controller's own port.
+gitlab_validate_reachable_address: "{{ ansible_host | default(inventory_hostname) }}"
 
 # `gitlab-rake gitlab:check`, GitLab's own full self-test. Thorough, and slow
 # enough (minutes) that it is opt-in.

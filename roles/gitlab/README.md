@@ -18,8 +18,11 @@ What it delivers, in one run, with no manual step afterwards:
   and available on demand
 - A **guarded upgrade path**: backup first, downgrades and unsupported version
   jumps refused, then reconfigure, restart and verify
+- **A host firewall that stays enabled**, opening exactly the ports this
+  instance serves — derived from the external URL and the enabled components
 - **Validation after every run**: services up, the running release, the web
-  interface answering, no pending migrations, credentials root-only
+  interface answering, no pending migrations, credentials root-only, and the
+  instance actually reachable from outside the host
 
 One GitLab per host. A reference architecture that splits Rails, Gitaly,
 PostgreSQL and Redis across machines is a different shape of deployment and
@@ -34,13 +37,14 @@ Contents
 4. [Variables](#4-variables)
 5. [Configuration: how `gitlab.rb` is built](#5-configuration-how-gitlabrb-is-built)
 6. [http or https](#6-http-or-https)
-7. [Backup](#7-backup)
-8. [Restore](#8-restore)
-9. [Upgrade](#9-upgrade)
-10. [Validation](#10-validation)
-11. [Tags](#11-tags)
-12. [Testing](#12-testing)
-13. [Troubleshooting](#13-troubleshooting)
+7. [Host firewall](#7-host-firewall)
+8. [Backup](#8-backup)
+9. [Restore](#9-restore)
+10. [Upgrade](#10-upgrade)
+11. [Validation](#11-validation)
+12. [Tags](#12-tags)
+13. [Testing](#13-testing)
+14. [Troubleshooting](#14-troubleshooting)
 
 1. Requirements
 ---------------
@@ -101,9 +105,8 @@ The preflight also refuses to continue when:
 `ansible.posix`, both only for the Molecule scenario.
 
 **The network.** The host needs HTTPS to `packages.gitlab.com` for the
-install, and this role does not touch the host firewall: on a stock Ubuntu
-`ufw` is inactive and nothing is blocked. If you enable one, GitLab needs
-`80`/`443` (and `22` for git-over-SSH) open.
+install. The role manages the host firewall itself — see
+[section 7](#7-host-firewall).
 
 2. Inventory
 ------------
@@ -395,14 +398,72 @@ When something in front of this host terminates TLS, keep the external URL
 ```yaml
 gitlab_external_url: "https://gitlab.example.com"
 gitlab_nginx_listen_https: false
+gitlab_nginx_listen_port: 80
 gitlab_trusted_proxies: ["10.0.0.10"]
 ```
+
+Both nginx settings, not just the first: `listen_https` decides whether nginx
+speaks TLS, and the port still follows the external URL unless you say
+otherwise — so without `listen_port` nginx would serve plain HTTP on 443.
+That is GitLab's own reverse-proxy recipe, and the role follows it rather than
+guessing a port for you.
 
 The certificate source then does not apply — the balancer has the
 certificate — and the role's validation notices, dialling the port nginx
 actually listens on rather than the one in the URL.
 
-7. Backup
+7. Host firewall
+----------------
+
+The firewall stays on. `ufw` is installed, the ports this instance actually
+serves are opened, unsolicited incoming traffic is denied by default, and the
+firewall is enabled — the same model as this collection's
+[`k3s`](../k3s) role, and for the same reason: a service is not finished
+until the host it runs on is defensible.
+
+The ports are **derived, not listed**, so they follow the configuration
+instead of drifting from it:
+
+| Opened | Where it comes from |
+| --- | --- |
+| The port nginx serves on | `gitlab_external_url` (or `gitlab_nginx_listen_port`) |
+| `80` | only when an https instance redirects plain HTTP (`gitlab_nginx_redirect_http_to_https`) |
+| The registry port | `gitlab_registry_external_url`, when the registry is enabled |
+| The Pages port | `gitlab_pages_external_url`, when Pages is enabled |
+| SSH | the port this play connects over, **and** `gitlab_shell_ssh_port` for git-over-SSH |
+| Anything else | `gitlab_firewall_extra_tcp_ports`, `..._udp_ports` |
+
+An http instance therefore gets `80` and not `443`, and an instance on
+`https://host:8443` gets `8443` and `80` — not a guess at both.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `gitlab_firewall_enabled` | `true` | Manage the rules at all |
+| `gitlab_firewall_manage_state` | `true` | Also enable ufw and set its default incoming policy to deny. Set false where something else owns the firewall's state and you only want GitLab's rules added |
+| `gitlab_firewall_ssh_sources` | `[]` | Networks allowed to reach SSH. Empty means anywhere |
+| `gitlab_firewall_http_sources` | `[]` | Networks allowed to reach the web interface and registry. Empty means anywhere |
+| `gitlab_firewall_extra_tcp_ports`, `..._udp_ports` | `[]` | Anything else this host serves |
+
+SSH is allowed **before** ufw is enabled, and the port the play is connected
+over is always among the allowed ones, so turning the firewall on cannot drop
+the session doing it. The rules are written after the GitLab package is
+installed, so nothing is mid-download when the ruleset is rebuilt, and before
+GitLab serves anything.
+
+Two things worth knowing if you turn this off:
+
+- A `ufw` that is already active keeps blocking GitLab, and the role will not
+  tell you — the HTTP validation goes over the loopback interface, which no
+  firewall touches.
+- That is what `gitlab_validate_check_reachable` exists for: at the end of a
+  run the controller dials GitLab's web port on
+  `gitlab_validate_reachable_address` (by default the address Ansible connects
+  over). It is the only check that leaves the host, and the only one that
+  notices a firewall, a cloud security group or a routing mistake between
+  clients and the instance. Switch it off where the controller reaches the
+  host through a bastion that does not carry HTTP.
+
+8. Backup
 ---------
 
 A GitLab backup is two separate things, and a restore needs both:
@@ -432,7 +493,7 @@ The archives are only proof against this host failing once they are copied off
 it. `gitlab_backup_upload_connection` does that from GitLab itself; otherwise
 it is a job for whatever backs up the rest of your estate.
 
-8. Restore
+9. Restore
 ----------
 
 Restoring is a deliberate, destructive operation on a running instance, so it
@@ -465,8 +526,8 @@ sudo gitlab-rake gitlab:check SANITIZE=true
 Then run the role again (`playbooks/gitlab.yml`): it re-renders `gitlab.rb`
 from your variables and runs the full validation.
 
-9. Upgrade
-----------
+10. Upgrade
+-----------
 
 ```bash
 ansible-playbook -i inventories/lab-gitlab/hosts.yml playbooks/gitlab-upgrade.yml \
@@ -494,7 +555,7 @@ What [`tasks/upgrade.yml`](tasks/upgrade.yml) does, in this order:
    asserts that the release installed is the one that was asked for.
 6. `gitlab-ctl reconfigure`, which runs the database migrations, then
    `gitlab-ctl restart`.
-7. Runs the full validation from section 10 — including that the version now
+7. Runs the full validation from section 11 — including that the version now
    *serving requests* is the new one, not just the version installed.
 
 GitLab is unavailable from the moment the package is replaced until the
@@ -510,7 +571,7 @@ After an upgrade GitLab finishes **background migrations** on its own
 schedule. Let them drain (Admin → Monitoring → Background migrations) before
 the next upgrade.
 
-10. Validation
+11. Validation
 --------------
 
 [`tasks/validate.yml`](tasks/validate.yml) runs at the end of a normal play
@@ -525,6 +586,7 @@ instance rather than the tasks that built it:
 | `/users/sign_in` answers 200 and the page is GitLab's | nginx listening while Rails is broken, or something else on the port |
 | `gitlab-rake db:abort_if_pending_migrations` | An interrupted reconfigure |
 | `gitlab.rb` and `gitlab-secrets.json` are `0600` root | Credentials readable by anyone with a shell |
+| The web port answers from the **controller** | A firewall rule, security group or route that leaves a healthy instance unreachable |
 
 The HTTP checks dial the loopback interface with a `Host` header, so they do
 not depend on DNS or on the certificate matching the address dialled — which
@@ -534,10 +596,10 @@ the external URL, so they still work behind a load balancer that terminates
 TLS; with `gitlab_nginx_enabled: false` there is nothing local to dial and they
 are skipped.
 
-11. Tags
+12. Tags
 --------
 
-`preflight`, `os`, `repository`, `install`, `tls`, `config`,
+`preflight`, `os`, `repository`, `install`, `firewall`, `tls`, `config`,
 `backup-schedule`, `validate`, `report`, plus two entry points that also carry
 `never`, so they are unreachable unless asked for explicitly:
 
@@ -554,7 +616,7 @@ ansible-playbook playbooks/gitlab.yml --tags config
 ansible-playbook playbooks/gitlab.yml --tags validate
 ```
 
-12. Testing
+13. Testing
 -----------
 
 One Molecule scenario, `default`: an Ubuntu 24.04 VirtualBox VM via Vagrant,
@@ -600,7 +662,7 @@ molecule test
 Expect it to take a while: two GitLab reconfigures and a set of migrations on
 one VM.
 
-13. Troubleshooting
+14. Troubleshooting
 -------------------
 
 ```bash

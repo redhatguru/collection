@@ -69,6 +69,21 @@ gitlab_smtp_enabled: false
 # gitlab_email_from: "gitlab@example.com"
 
 # --------------------------------------------------------------------------
+# Host firewall — on, with the ports derived from the settings above
+# --------------------------------------------------------------------------
+#
+# Narrow these to your own networks. Empty means anywhere, which is what an
+# instance people clone from usually needs for the web ports, and rarely the
+# right answer for SSH.
+
+gitlab_firewall_enabled: true
+gitlab_firewall_manage_state: true
+
+gitlab_firewall_ssh_sources:
+  - 10.10.0.0/16
+gitlab_firewall_http_sources: []
+
+# --------------------------------------------------------------------------
 # Backups — both halves, and off this host
 # --------------------------------------------------------------------------
 
