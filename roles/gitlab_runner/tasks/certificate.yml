@@ -1,0 +1,45 @@
+---
+# Installs the certificate the runner should trust, where the runner looks for
+# it: /etc/gitlab-runner/certs/<the URL's host>.crt. That file is read on
+# every call to GitLab, so a renewed certificate needs no re-registration, and
+# the runner also hands it to the job's git through CI_SERVER_TLS_CA_FILE —
+# which is what makes `git clone` inside a job work against a GitLab whose
+# certificate no public CA signed.
+#
+# Only reached when a certificate was supplied. A GitLab with a publicly
+# trusted certificate needs none of this.
+
+- name: "ALL | Ensure the runner's certificate directory exists"
+  ansible.builtin.file:
+    path: "{{ gitlab_runner_certs_dir }}"
+    state: directory
+    owner: root
+    group: root
+    # Readable rather than private: a certificate is public, and the runner
+    # reads it as root while jobs may need the path.
+    mode: "0755"
+  become: true
+
+- name: "ALL | Ensure GitLab's certificate is installed from the file supplied"
+  ansible.builtin.copy:
+    src: "{{ gitlab_runner_ca_certificate_src }}"
+    dest: "{{ gitlab_runner_ca_certificate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: "ALL | Restart the runner so it picks up its configuration"
+  when: gitlab_runner_ca_certificate_src | length > 0
+
+- name: "ALL | Ensure GitLab's certificate is installed from the content supplied"
+  ansible.builtin.copy:
+    content: "{{ gitlab_runner_ca_certificate_content }}"
+    dest: "{{ gitlab_runner_ca_certificate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: "ALL | Restart the runner so it picks up its configuration"
+  when:
+    - gitlab_runner_ca_certificate_src | length == 0
+    - gitlab_runner_ca_certificate_content | length > 0

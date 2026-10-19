@@ -1,0 +1,38 @@
+---
+# The official instructions pipe a shell script from packages.gitlab.com into
+# bash. This does what the script does — install the signing key and the apt
+# source — without running anything downloaded, and leaves both as managed
+# files visible in a diff.
+
+- name: "DEBIAN | Ensure the GitLab Runner package signing key is installed"
+  ansible.builtin.get_url:
+    url: "{{ gitlab_runner_repository_gpg_key_url }}"
+    dest: "{{ gitlab_runner_apt_keyring_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: gitlab_runner_repository_key
+
+# Referenced from this one source with signed-by, so the key can only ever
+# vouch for GitLab Runner packages — a key in the global trust store vouches
+# for every repository on the host.
+- name: "DEBIAN | Ensure the GitLab Runner package repository is configured"
+  ansible.builtin.deb822_repository:
+    name: "{{ gitlab_runner_apt_repository_filename }}"
+    types: [deb]
+    uris: "{{ gitlab_runner_repository_url }}"
+    suites: "{{ gitlab_runner_repository_suite }}"
+    components: "{{ gitlab_runner_repository_components }}"
+    architectures: "{{ gitlab_runner_docker_engine_architecture }}"
+    signed_by: "{{ gitlab_runner_apt_keyring_file }}"
+    enabled: true
+    state: present
+  become: true
+  register: gitlab_runner_repository_source
+
+- name: "DEBIAN | Refresh the package lists so the runner repository is readable"
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  when: gitlab_runner_repository_source is changed or gitlab_runner_repository_key is changed

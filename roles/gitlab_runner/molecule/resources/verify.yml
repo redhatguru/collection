@@ -1,0 +1,217 @@
+---
+# Checks the runner the way an operator would: the service, what GitLab itself
+# says about the runner, the certificate chain, and whether a job container
+# can actually start. Nothing here asks the role what it did.
+
+- name: Verify the runner on its own host
+  hosts: gitlab_runners
+  gather_facts: true
+
+  tasks:
+    - name: Check that the runner service is running
+      ansible.builtin.command:
+        argv: [systemctl, is-active, gitlab-runner]
+      register: gitlab_runner_test_service
+      changed_when: false
+
+    - name: Assert the runner service is running
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_service.stdout | trim == 'active'
+        fail_msg: "gitlab-runner is {{ gitlab_runner_test_service.stdout | trim }}"
+
+    # The authoritative check: verify asks GitLab whether this runner's token
+    # is one it accepts, so it fails for a revoked or mistyped token where a
+    # local check would not.
+    - name: Ask GitLab whether this runner is registered
+      ansible.builtin.command:
+        argv: [/usr/bin/gitlab-runner, verify]
+      become: true
+      register: gitlab_runner_test_verify
+      changed_when: false
+
+    - name: Assert GitLab recognises the runner
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_verify.rc == 0
+        fail_msg: "gitlab-runner verify failed: {{ gitlab_runner_test_verify.stderr | default('') }}"
+
+    - name: Read the rendered runner configuration
+      ansible.builtin.slurp:
+        src: /etc/gitlab-runner/config.toml
+      become: true
+      register: gitlab_runner_test_config
+
+    - name: Assert the configuration was rendered from the role's variables
+      ansible.builtin.assert:
+        that:
+          - item in gitlab_runner_test_config.content | b64decode
+        fail_msg: "config.toml does not contain: {{ item }}"
+      loop:
+        - 'url = "https://gitlab.molecule.local"'
+        - 'token = "glrt-'
+        - 'executor = "docker"'
+        - 'image = "alpine:3.21"'
+        - 'privileged = false'
+        - 'concurrent = 1'
+        # The certificate the role installed, named in config.toml so the
+        # runner hands it to the job's git as well.
+        - 'tls-ca-file = "/etc/gitlab-runner/certs/gitlab.molecule.local.crt"'
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Check the permissions on the runner's credentials
+      ansible.builtin.stat:
+        path: /etc/gitlab-runner/config.toml
+      become: true
+      register: gitlab_runner_test_config_stat
+
+    - name: Assert the authentication token is readable by root only
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_config_stat.stat.mode == '0600'
+          - gitlab_runner_test_config_stat.stat.pw_name == 'root'
+        fail_msg: "config.toml is {{ gitlab_runner_test_config_stat.stat.mode }}"
+
+    - name: Check that GitLab's certificate is where the runner looks for it
+      ansible.builtin.stat:
+        path: /etc/gitlab-runner/certs/gitlab.molecule.local.crt
+      become: true
+      register: gitlab_runner_test_ca_file
+
+    - name: Assert the certificate is installed
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_ca_file.stat.exists
+          - gitlab_runner_test_ca_file.stat.size > 0
+        fail_msg: "No certificate at /etc/gitlab-runner/certs/gitlab.molecule.local.crt"
+
+    - name: Check that the runner can reach GitLab's API through that certificate
+      ansible.builtin.uri:
+        url: "https://{{ gitlab_runner_test_hostname }}/api/v4/version"
+        ca_path: /etc/gitlab-runner/certs/gitlab.molecule.local.crt
+        status_code: [401]
+      changed_when: false
+
+    - name: Collect the Docker version the runner will use
+      ansible.builtin.command:
+        argv: [docker, info, --format, "{{ '{{' }}.ServerVersion{{ '}}' }}"]
+      become: true
+      register: gitlab_runner_test_docker
+      changed_when: false
+
+    - name: Assert Docker answers
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_docker.rc == 0
+          - gitlab_runner_test_docker.stdout | trim | length > 0
+        fail_msg: "docker info: {{ gitlab_runner_test_docker.stderr | default('') }}"
+
+    # What a job does, in the same engine with the same image.
+    - name: Run a container the way a job would
+      ansible.builtin.command:
+        argv: [docker, run, --rm, "alpine:3.21", /bin/echo, molecule]
+      become: true
+      register: gitlab_runner_test_container
+      changed_when: false
+
+    - name: Assert a job container can start
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_container.rc == 0
+          - "'molecule' in gitlab_runner_test_container.stdout"
+        fail_msg: "docker run failed: {{ gitlab_runner_test_container.stderr | default('') }}"
+
+- name: Verify what GitLab itself knows about the runner
+  hosts: gitlab_servers
+  gather_facts: false
+
+  tasks:
+    # Minted here rather than taken from converge.yml: Molecule runs each
+    # playbook as its own ansible-playbook invocation, so a fact set during
+    # converge is gone by the time verify runs.
+    - name: Mint an access token to read GitLab's API with
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/gitlab-rails
+          - runner
+          - |
+            user = User.find_by_username('root')
+            token = user.personal_access_tokens.create!(
+              name: "molecule-verify-#{Time.now.to_i}",
+              scopes: ['api'],
+              expires_at: 1.day.from_now
+            )
+            puts token.token
+      become: true
+      register: gitlab_runner_test_verify_pat
+      changed_when: true
+      no_log: true
+
+    - name: Keep that token for the checks below
+      ansible.builtin.set_fact:
+        gitlab_runner_test_api_token: "{{ gitlab_runner_test_verify_pat.stdout_lines | last | trim }}"
+      no_log: true
+
+    - name: Ask GitLab for the runners it knows
+      ansible.builtin.uri:
+        url: "https://{{ gitlab_runner_test_hostname }}/api/v4/runners/all?per_page=100"
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_runner_test_api_token }}"
+        ca_path: "/etc/gitlab/ssl/{{ gitlab_runner_test_hostname }}.crt"
+        status_code: [200]
+      become: true
+      register: gitlab_runner_test_runners
+      changed_when: false
+      no_log: true
+
+    # Exactly one, not at least one: converge and the idempotence run both
+    # went through the registration path, and a role that created a runner
+    # each time would leave two here. This is where that is caught.
+    - name: Assert GitLab holds exactly one runner with this description
+      ansible.builtin.assert:
+        that:
+          - matching | length == 1
+          - (matching | first).runner_type == 'instance_type'
+        fail_msg: >-
+          GitLab knows {{ matching | length }} runners called
+          'molecule-docker-runner'
+          ({{ gitlab_runner_test_runners.json | map(attribute='description') | list }}).
+          Exactly one is expected: a second one means the role created a new
+          runner on its second run instead of keeping the token it already had.
+      vars:
+        matching: >-
+          {{ gitlab_runner_test_runners.json
+             | selectattr('description', 'equalto', 'molecule-docker-runner') | list }}
+
+    - name: Assert the runner reports itself online to GitLab
+      ansible.builtin.uri:
+        url: "https://{{ gitlab_runner_test_hostname }}/api/v4/runners/{{ runner_id }}"
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_runner_test_api_token }}"
+        ca_path: "/etc/gitlab/ssl/{{ gitlab_runner_test_hostname }}.crt"
+        status_code: [200]
+      become: true
+      register: gitlab_runner_test_runner_detail
+      changed_when: false
+      no_log: true
+      retries: 12
+      delay: 10
+      until: gitlab_runner_test_runner_detail.json.status | default('') in ['online', 'never_contacted']
+      vars:
+        runner_id: >-
+          {{ (gitlab_runner_test_runners.json
+              | selectattr('description', 'equalto', 'molecule-docker-runner')
+              | first).id }}
+
+    - name: Assert the tags the role asked for are the tags GitLab holds
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_runner_detail.json.tag_list | sort == ['docker', 'molecule']
+          - gitlab_runner_test_runner_detail.json.run_untagged
+        fail_msg: >-
+          GitLab holds tags
+          {{ gitlab_runner_test_runner_detail.json.tag_list | default([]) }} for this
+          runner, expected ['docker', 'molecule'] — the role sets these when
+          it creates the runner, so this is what proves the API call carried
+          them.

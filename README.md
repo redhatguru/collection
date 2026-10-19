@@ -40,6 +40,7 @@ ansible-galaxy collection install -r requirements.yml
 | [`k3s`](roles/k3s) | Install, configure and harden a K3s cluster — single node, single control plane with workers, or an HA embedded-etcd control plane, all derived from the inventory. Includes OS preparation, a node-role aware firewall that stays enabled, CIS-style hardening, MetalLB, Traefik (HA), cert-manager, etcd snapshots, post-install validation and a rolling upgrade. | RHEL/Rocky/AlmaLinux 9+, Ubuntu 22.04+, Debian 12+ (x86_64, ARM64) |
 | [`k3s_app`](roles/k3s_app) | Deploy applications onto an existing cluster from a declarative definition — namespace, workload, Service, Ingress, ConfigMaps, Secrets, PVCs and NetworkPolicies — plus raw manifests and Helm releases. Restricted Pod Security Standards and a default-deny NetworkPolicy by default. | Any host with a kubeconfig for the cluster |
 | [`gitlab`](roles/gitlab) | Install and configure a single-node GitLab (Omnibus) on Ubuntu, with the whole of `gitlab.rb` rendered from variables. Checks the host against GitLab's hardware requirements before installing anything, schedules both halves of a restorable backup (data and secrets), verifies the instance after every run, and provides a guarded upgrade path that backs up first, refuses an unsupported version jump and proves the new release is the one serving requests. | Ubuntu 22.04/24.04/26.04 (x86_64, ARM64) |
+| [`gitlab_runner`](roles/gitlab_runner) | Install GitLab Runner and the Docker engine, configure the docker executor from variables, and register the runner to an instance, group or project — creating it through GitLab's API to obtain its authentication token, since registration tokens no longer exist. Installs the certificate of a GitLab no public CA signed for, and has GitLab itself confirm the runner is registered. | Ubuntu 22.04/24.04/26.04 (x86_64, ARM64) |
 | [`awx`](roles/awx) | Deploy AWX on an existing Kubernetes cluster via the AWX Operator, using an external PostgreSQL database. | Any host with a `kubeadm` Kubernetes cluster already applied |
 | [`pxeboot`](roles/pxeboot) | Set up a PXE network boot server (proxy-DHCP + TFTP via `dnsmasq`), with Memtest86+ as the first BIOS/UEFI boot menu entry. | Rocky Linux 9, Ubuntu 24.04/26.04 |
 
@@ -50,8 +51,8 @@ See each role's README for its full variable list and an example playbook.
 - `roles/` — reusable Ansible roles (see table above)
 - `playbooks/` — `site.yml`, `k3s.yml`, `applications.yml` and
   `upgrade.yml` for the K3s roles, `gitlab.yml`, `gitlab-example.yml`,
-  `gitlab-backup.yml` and `gitlab-upgrade.yml` for GitLab, plus other utility
-  playbooks
+  `gitlab-backup.yml`, `gitlab-upgrade.yml` and `gitlab-runner.yml` for GitLab,
+  plus other utility playbooks
 - `inventories/` — worked inventory examples (`lab-single-node`, `lab-ha`,
   `lab-gitlab`)
 - `plugins/` — custom modules, filters, and other plugins
@@ -62,9 +63,10 @@ Every role has at least one Molecule scenario that runs it in VirtualBox VMs
 via Vagrant, typically across Rocky Linux 9, Rocky Linux 10, Ubuntu 24.04 and
 Ubuntu 26.04 (see each role's README for its exact scenarios — `k3s` has
 `default`, `rockylinux` and a four-VM `cluster-ha` scenario, `awx` a two-VM
-scenario on both Ubuntu 26.04 and Rocky Linux 9, and `gitlab` one Ubuntu 24.04
-scenario that installs, backs up and upgrades in sequence). From inside a role
-directory:
+scenario on both Ubuntu 26.04 and Rocky Linux 9, `gitlab` one Ubuntu 24.04
+scenario that installs, backs up and upgrades in sequence, and `gitlab_runner`
+a two-VM scenario that registers a runner against a GitLab built by the
+`gitlab` role). From inside a role directory:
 
 ```bash
 pip install molecule "molecule-plugins[vagrant]" python-vagrant

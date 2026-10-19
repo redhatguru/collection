@@ -1,0 +1,18 @@
+---
+# The runner reloads its configuration on restart only. A restart finishes the
+# jobs it is running first, so this is not as disruptive as it looks.
+- name: "ALL | Restart the runner so it picks up its configuration"
+  ansible.builtin.systemd_service:
+    name: "{{ gitlab_runner_service_name }}"
+    state: restarted
+    enabled: true
+  become: true
+
+# Defined after the runner's handler so that on a first install Docker is
+# restarted first, before the runner is asked to use it. Restarting Docker
+# stops every running container, jobs included.
+- name: "ALL | Restart Docker so the daemon configuration is applied"
+  ansible.builtin.systemd_service:
+    name: docker
+    state: restarted
+  become: true

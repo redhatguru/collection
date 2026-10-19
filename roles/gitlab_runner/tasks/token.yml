@@ -1,0 +1,132 @@
+---
+# Where the authentication token comes from, in this order:
+#
+#   1. the token already in config.toml on this host — which is what makes a
+#      second run change nothing, and why the role never creates a second
+#      runner in GitLab for a host it has already set up;
+#   2. gitlab_runner_authentication_token, for a runner created in the UI;
+#   3. GitLab's API, which creates the runner and returns its token.
+#
+# Registration tokens are not part of this: since GitLab 16.0 a runner is
+# created first and the token it returns is the only credential involved.
+# There is nothing to read off a group or project any more.
+
+- name: "ALL | Check whether this host already has a runner configuration"
+  ansible.builtin.stat:
+    path: "{{ gitlab_runner_config_file }}"
+  become: true
+  register: gitlab_runner_config_state
+
+- name: "ALL | Read the configuration this host already has"
+  ansible.builtin.slurp:
+    src: "{{ gitlab_runner_config_file }}"
+  become: true
+  register: gitlab_runner_existing_config
+  no_log: true
+  when: gitlab_runner_config_state.stat.exists
+
+- name: "ALL | Recover the token this host is already registered with"
+  ansible.builtin.set_fact:
+    gitlab_runner_existing_token: >-
+      {{ ((gitlab_runner_existing_config.content | b64decode
+           | regex_search('token\s*=\s*"([^"]+)"', '\1') | default([], true) | first | default('', true))
+          if gitlab_runner_config_state.stat.exists else '') }}
+  no_log: true
+
+- name: "ALL | Decide whether a runner has to be created in GitLab at all"
+  ansible.builtin.set_fact:
+    gitlab_runner_create_needed: >-
+      {{ gitlab_runner_existing_token | length == 0
+         and gitlab_runner_authentication_token | length == 0 }}
+
+# POST /user/runners takes a numeric group_id or project_id, so a path like
+# "platform/infra" has to be resolved first. A numeric value is used as it is
+# and this call is skipped.
+- name: "ALL | Look up the numeric ID of the group or project to attach to"
+  ansible.builtin.uri:
+    url: "{{ gitlab_runner_scope_lookup_url | trim }}"
+    headers:
+      PRIVATE-TOKEN: "{{ gitlab_runner_api_token }}"
+    validate_certs: "{{ gitlab_runner_api_validate_certs | bool }}"
+    ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_supplied | bool else omit }}"
+    timeout: 30
+  register: gitlab_runner_scope_lookup
+  # The request carries the access token in a header.
+  no_log: true
+  when:
+    - gitlab_runner_create_needed | bool
+    - gitlab_runner_scope in ['group', 'project']
+    - not gitlab_runner_scope_target_is_id | bool
+
+- name: "ALL | Record the numeric ID the runner will be attached to"
+  ansible.builtin.set_fact:
+    gitlab_runner_scope_id: >-
+      {{ gitlab_runner_scope_target | trim if gitlab_runner_scope_target_is_id | bool
+         else (gitlab_runner_scope_lookup.json.id | default('')) }}
+
+- name: "ALL | Ensure the group or project to attach to was found"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_scope_id | string | trim | length > 0
+    fail_msg: >-
+      '{{ gitlab_runner_scope_target | trim }}' could not be resolved to a
+      {{ gitlab_runner_scope }} on {{ gitlab_runner_url }}. Check the full
+      path (a group's path is what appears in its URL, "platform/infra", not
+      its display name) and that gitlab_runner_api_token belongs to someone
+      who can see it.
+    quiet: true
+  when:
+    - gitlab_runner_create_needed | bool
+    - gitlab_runner_scope in ['group', 'project']
+
+- name: "ALL | Create the runner in GitLab and read back its authentication token"
+  ansible.builtin.uri:
+    url: "{{ gitlab_runner_api_url }}"
+    method: POST
+    headers:
+      PRIVATE-TOKEN: "{{ gitlab_runner_api_token }}"
+    body_format: json
+    body: "{{ gitlab_runner_api_body }}"
+    status_code: [200, 201]
+    validate_certs: "{{ gitlab_runner_api_validate_certs | bool }}"
+    # Verified against the same certificate the runner itself will use, so a
+    # self-signed GitLab needs no exception here.
+    ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_supplied | bool else omit }}"
+    timeout: 30
+  register: gitlab_runner_api_response
+  # The answer contains the token.
+  no_log: true
+  when: gitlab_runner_create_needed | bool
+
+- name: "ALL | Decide which token this runner uses"
+  ansible.builtin.set_fact:
+    gitlab_runner_token: >-
+      {{ gitlab_runner_existing_token if gitlab_runner_existing_token | length > 0
+         else (gitlab_runner_authentication_token if gitlab_runner_authentication_token | length > 0
+               else (gitlab_runner_api_response.json.token | default(''))) }}
+  no_log: true
+
+# Separate from the token itself, so the report can say where it came from
+# without the token ever being printed.
+- name: "ALL | Record where that token came from"
+  ansible.builtin.set_fact:
+    gitlab_runner_token_source: >-
+      {{ 'the configuration already on this host'
+         if gitlab_runner_existing_token | length > 0
+         else ('gitlab_runner_authentication_token'
+               if gitlab_runner_authentication_token | length > 0
+               else 'a runner created through the API during this run') }}
+    gitlab_runner_created_id: "{{ gitlab_runner_api_response.json.id | default('') }}"
+
+- name: "ALL | Ensure this runner has a token to register with"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_token | trim | length > 0
+    fail_msg: >-
+      No authentication token could be resolved for this runner. Supply one of
+      three things: gitlab_runner_authentication_token for a runner you
+      created in GitLab's UI, gitlab_runner_api_token (a personal or group
+      access token with the create_runner scope) so the role can create the
+      runner itself, or a host that is already registered. Registration tokens
+      are not an option — GitLab removed them.
+    quiet: true

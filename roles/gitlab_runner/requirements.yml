@@ -1,0 +1,8 @@
+---
+collections:
+  # community.general — version_sort, used by the Molecule scenario to resolve
+  #                     which GitLab release to test against
+  # ansible.posix     — mount, used by the Molecule scenario to give the
+  #                     GitLab VM the swap its requirements ask for
+  - name: community.general
+  - name: ansible.posix

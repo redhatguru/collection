@@ -1,0 +1,146 @@
+---
+# vars file for gitlab_runner
+#
+# Values the role derives rather than accepts: the paths the packages own, and
+# the API call's shape. Overriding these separately from the variables they
+# are built from would let the preflight checks pass while something else is
+# configured.
+
+# --------------------------------------------------------------------------
+# Supported platforms
+# --------------------------------------------------------------------------
+
+gitlab_runner_supported_os_families:
+  - Debian
+
+gitlab_runner_supported_distributions:
+  - Ubuntu
+
+gitlab_runner_supported_ubuntu_releases:
+  - jammy
+  - noble
+  - resolute
+
+gitlab_runner_supported_architectures:
+  - x86_64
+  - aarch64
+
+gitlab_runner_supported_executors:
+  - docker
+  - shell
+
+gitlab_runner_supported_scopes:
+  - instance
+  - group
+  - project
+
+# --------------------------------------------------------------------------
+# Packages and repositories
+# --------------------------------------------------------------------------
+
+gitlab_runner_package_name: "gitlab-runner"
+
+gitlab_runner_repository_url: "https://packages.gitlab.com/runner/gitlab-runner/ubuntu"
+gitlab_runner_repository_gpg_key_url: "https://packages.gitlab.com/runner/gitlab-runner/gpgkey"
+gitlab_runner_repository_suite: "{{ ansible_facts['distribution_release'] }}"
+gitlab_runner_repository_components: "main"
+
+gitlab_runner_apt_keyring_dir: "/etc/apt/keyrings"
+gitlab_runner_apt_keyring_file: "{{ gitlab_runner_apt_keyring_dir }}/gitlab-runner.asc"
+gitlab_runner_apt_repository_filename: "gitlab-runner"
+
+gitlab_runner_docker_engine_keyring_file: "{{ gitlab_runner_apt_keyring_dir }}/docker.asc"
+gitlab_runner_docker_engine_repository_filename: "docker"
+
+gitlab_runner_docker_engine_architecture: "{{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else 'arm64' }}"
+
+gitlab_runner_os_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - python3-debian
+
+# --------------------------------------------------------------------------
+# Paths the packages own
+# --------------------------------------------------------------------------
+
+gitlab_runner_config_dir: "/etc/gitlab-runner"
+gitlab_runner_config_file: "{{ gitlab_runner_config_dir }}/config.toml"
+gitlab_runner_certs_dir: "{{ gitlab_runner_config_dir }}/certs"
+gitlab_runner_command: "/usr/bin/gitlab-runner"
+gitlab_runner_service_name: "gitlab-runner"
+gitlab_runner_user: "gitlab-runner"
+gitlab_runner_docker_socket: "/var/run/docker.sock"
+
+# --------------------------------------------------------------------------
+# The GitLab URL, taken apart
+# --------------------------------------------------------------------------
+
+gitlab_runner_url_scheme: "{{ gitlab_runner_url | urlsplit('scheme') }}"
+gitlab_runner_url_host: "{{ gitlab_runner_url | urlsplit('hostname') }}"
+gitlab_runner_url_port: >-
+  {{ gitlab_runner_url | urlsplit('port')
+     | default(443 if (gitlab_runner_url | urlsplit('scheme')) == 'https' else 80, true) }}
+
+# Where the runner looks for a certificate it should trust: the host name as
+# it appears in the URL, with .crt appended. The runner reads this on every
+# call to GitLab, so a renewed certificate needs no re-registration.
+gitlab_runner_ca_certificate_file: "{{ gitlab_runner_certs_dir }}/{{ gitlab_runner_url_host }}.crt"
+
+gitlab_runner_ca_certificate_supplied: >-
+  {{ (gitlab_runner_ca_certificate_src | length > 0)
+     or (gitlab_runner_ca_certificate_content | length > 0) }}
+
+# The CA file config.toml names: the explicit one when given, the installed
+# one when this role installed it, and nothing otherwise — where GitLab's
+# certificate is signed by a CA the host already trusts.
+gitlab_runner_tls_ca_file_effective: >-
+  {{ gitlab_runner_tls_ca_file if gitlab_runner_tls_ca_file | length > 0
+     else (gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_supplied | bool else '') }}
+
+# --------------------------------------------------------------------------
+# The API call that creates the runner
+# --------------------------------------------------------------------------
+
+gitlab_runner_api_url: "{{ gitlab_runner_url | regex_replace('/$', '') }}/api/v4/user/runners"
+
+gitlab_runner_api_runner_type: "{{ gitlab_runner_scope }}_type"
+
+# POST /user/runners wants a numeric group_id or project_id, so a path has to
+# be looked up first. The path goes into the URL as one segment, which is why
+# the slashes become %2F — GitLab's own convention for addressing a group or
+# project by path.
+gitlab_runner_scope_target: >-
+  {{ gitlab_runner_group if gitlab_runner_scope == 'group'
+     else (gitlab_runner_project if gitlab_runner_scope == 'project' else '') }}
+gitlab_runner_scope_target_is_id: "{{ gitlab_runner_scope_target | trim is match('^[0-9]+$') }}"
+gitlab_runner_scope_lookup_url: >-
+  {{ gitlab_runner_url | regex_replace('/$', '') }}/api/v4/{{
+     'groups' if gitlab_runner_scope == 'group' else 'projects' }}/{{
+     gitlab_runner_scope_target | trim | replace('/', '%2F') }}
+
+# Only the fields GitLab's POST /user/runners accepts, and only the ones this
+# deployment actually sets — an empty description or a zero timeout is left
+# out rather than sent as a value. Posted as JSON rather than form data, so
+# the booleans arrive as booleans: form encoding would send Python's "True",
+# which GitLab does not read as true.
+gitlab_runner_api_body: >-
+  {{ {'runner_type': gitlab_runner_api_runner_type,
+      'description': gitlab_runner_description,
+      'paused': gitlab_runner_paused | bool,
+      'locked': gitlab_runner_locked | bool,
+      'run_untagged': gitlab_runner_run_untagged | bool,
+      'access_level': gitlab_runner_access_level}
+     | combine({'group_id': gitlab_runner_scope_id | int} if gitlab_runner_scope == 'group' else {})
+     | combine({'project_id': gitlab_runner_scope_id | int} if gitlab_runner_scope == 'project' else {})
+     | combine({'tag_list': gitlab_runner_tags | join(',')} if gitlab_runner_tags | length > 0 else {})
+     | combine({'maximum_timeout': gitlab_runner_maximum_timeout | int}
+               if gitlab_runner_maximum_timeout | int > 0 else {})
+     | combine({'maintenance_note': gitlab_runner_maintenance_note}
+               if gitlab_runner_maintenance_note | length > 0 else {}) }}
+
+# How the scope reads in the end-of-run report.
+gitlab_runner_scope_description: >-
+  {{ gitlab_runner_scope
+     ~ (' ' ~ gitlab_runner_group if gitlab_runner_scope == 'group'
+        else (' ' ~ gitlab_runner_project if gitlab_runner_scope == 'project' else '')) }}

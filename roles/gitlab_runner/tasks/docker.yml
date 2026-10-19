@@ -1,0 +1,71 @@
+---
+# Docker CE from Docker's own repository rather than Ubuntu's docker.io: the
+# docker executor follows the engine's releases closely, and this is the
+# version GitLab tests against.
+
+- name: "DEBIAN | Ensure the Docker package signing key is installed"
+  ansible.builtin.get_url:
+    url: "{{ gitlab_runner_docker_engine_gpg_key_url }}"
+    dest: "{{ gitlab_runner_docker_engine_keyring_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: gitlab_runner_docker_key
+
+- name: "DEBIAN | Ensure the Docker package repository is configured"
+  ansible.builtin.deb822_repository:
+    name: "{{ gitlab_runner_docker_engine_repository_filename }}"
+    types: [deb]
+    uris: "{{ gitlab_runner_docker_engine_repository_url }}"
+    suites: "{{ gitlab_runner_docker_engine_suite }}"
+    components: "{{ gitlab_runner_docker_engine_components }}"
+    architectures: "{{ gitlab_runner_docker_engine_architecture }}"
+    signed_by: "{{ gitlab_runner_docker_engine_keyring_file }}"
+    enabled: true
+    state: present
+  become: true
+  register: gitlab_runner_docker_source
+
+- name: "DEBIAN | Refresh the package lists so the Docker repository is readable"
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  when: gitlab_runner_docker_source is changed or gitlab_runner_docker_key is changed
+
+- name: "DEBIAN | Ensure the Docker engine is installed"
+  ansible.builtin.apt:
+    name: "{{ gitlab_runner_docker_engine_packages }}"
+    state: present
+  become: true
+
+# Docker's own default is no log rotation at all, so a long-running job's
+# output fills the disk until something fails with no space left.
+- name: "ALL | Ensure the Docker daemon configuration matches the role's variables"
+  ansible.builtin.copy:
+    content: "{{ gitlab_runner_docker_engine_daemon_configuration | to_nice_json }}\n"
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: "ALL | Restart Docker so the daemon configuration is applied"
+  when: gitlab_runner_docker_engine_daemon_configuration | length > 0
+
+- name: "ALL | Ensure Docker is enabled and running"
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+  become: true
+
+# Membership of this group is equivalent to root on this host, which is why
+# the list is empty by default: the runner service runs as root and needs
+# none of it.
+- name: "ALL | Ensure the accounts that need the Docker socket are in the docker group"
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  become: true
+  loop: "{{ gitlab_runner_docker_engine_users }}"

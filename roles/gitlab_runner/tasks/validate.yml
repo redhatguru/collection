@@ -1,0 +1,125 @@
+---
+# Proves the runner can actually take a job, rather than that the tasks which
+# built it reported success. Read-only throughout.
+
+- name: "ALL | Check that the runner service is running"
+  ansible.builtin.command:
+    argv: [systemctl, is-active, "{{ gitlab_runner_service_name }}"]
+  register: gitlab_runner_validate_service
+  changed_when: false
+  failed_when: false
+  when: gitlab_runner_validate_check_service | bool
+
+- name: "ALL | Ensure the runner service is running"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_validate_service.stdout | trim == 'active'
+    fail_msg: >-
+      The {{ gitlab_runner_service_name }} service is
+      '{{ gitlab_runner_validate_service.stdout | default('missing') | trim }}'.
+      Read `journalctl -u {{ gitlab_runner_service_name }} -n 50` — a
+      malformed config.toml and an unreadable certificate both land here.
+    quiet: true
+  when: gitlab_runner_validate_check_service | bool
+
+# The check that makes this role trustworthy: `verify` asks GitLab whether
+# this runner's token is still good, so a revoked, expired or mistyped token
+# fails the run instead of leaving a runner that silently never picks up work.
+- name: "ALL | Ask GitLab whether this runner is registered"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_runner_command }}", verify]
+  become: true
+  register: gitlab_runner_validate_verify
+  changed_when: false
+  failed_when: false
+  retries: 6
+  delay: 5
+  until: gitlab_runner_validate_verify.rc == 0
+  when: gitlab_runner_validate_check_registration | bool
+
+- name: "ALL | Ensure GitLab recognises this runner"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_validate_verify.rc == 0
+    fail_msg: >-
+      `gitlab-runner verify` was refused by {{ gitlab_runner_url }}:
+      {{ (gitlab_runner_validate_verify.stderr_lines | default([]))[-3:] | join(' / ') }}
+      The token in {{ gitlab_runner_config_file }} is not one GitLab accepts —
+      it was revoked, it expired, or the runner it belonged to was deleted.
+      Remove that file and re-run with gitlab_runner_api_token set to create a
+      fresh runner.
+    quiet: true
+  when: gitlab_runner_validate_check_registration | bool
+
+- name: "ALL | Check that Docker is usable on this host"
+  ansible.builtin.command:
+    argv: [docker, info, --format, "{{ '{{' }}.ServerVersion{{ '}}' }}"]
+  become: true
+  register: gitlab_runner_validate_docker
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_runner_validate_check_docker | bool
+    - gitlab_runner_executor == 'docker'
+
+- name: "ALL | Ensure Docker answers"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_validate_docker.rc == 0
+      - gitlab_runner_validate_docker.stdout | trim | length > 0
+    fail_msg: >-
+      `docker info` failed:
+      {{ gitlab_runner_validate_docker.stderr | default('') | trim }}. The
+      docker executor runs every job in a container, so until this works no
+      job on this runner can start.
+    quiet: true
+  when:
+    - gitlab_runner_validate_check_docker | bool
+    - gitlab_runner_executor == 'docker'
+
+# The only check that proves a job could actually start here: same engine,
+# same default image, same pull the first job would do.
+- name: "ALL | Run a throwaway container with the image jobs default to"
+  ansible.builtin.command:
+    argv: [docker, run, --rm, "{{ gitlab_runner_docker_image }}", /bin/true]
+  become: true
+  register: gitlab_runner_validate_container
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_runner_validate_run_container | bool
+    - gitlab_runner_executor == 'docker'
+
+- name: "ALL | Ensure a job container can be started and pulled"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_validate_container.rc == 0
+    fail_msg: >-
+      `docker run {{ gitlab_runner_docker_image }}` failed:
+      {{ gitlab_runner_validate_container.stderr | default('') | trim }}. A job
+      on this runner would fail the same way — usually the host cannot reach
+      the registry, or the image name is wrong.
+    quiet: true
+  when:
+    - gitlab_runner_validate_run_container | bool
+    - gitlab_runner_executor == 'docker'
+
+- name: "ALL | Ensure the runner's credentials are readable by root only"
+  ansible.builtin.stat:
+    path: "{{ gitlab_runner_config_file }}"
+  become: true
+  register: gitlab_runner_validate_config
+
+- name: "ALL | Ensure nothing but root can read the authentication token"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_validate_config.stat.exists
+      - gitlab_runner_validate_config.stat.mode == '0600'
+      - gitlab_runner_validate_config.stat.pw_name == 'root'
+    fail_msg: >-
+      {{ gitlab_runner_config_file }} is
+      {{ gitlab_runner_validate_config.stat.mode | default('missing') }} owned
+      by {{ gitlab_runner_validate_config.stat.pw_name | default('nobody') }},
+      expected 0600 owned by root. That file holds the token that lets this
+      host take jobs — and their variables — from GitLab.
+    quiet: true

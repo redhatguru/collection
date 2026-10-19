@@ -1,0 +1,82 @@
+---
+# Worked example for the gitlab_runner role.
+#
+# The two values that have to be right are the GitLab URL and how the runner
+# authenticates. Everything else has a working default.
+
+# --------------------------------------------------------------------------
+# The GitLab this runner belongs to
+# --------------------------------------------------------------------------
+
+gitlab_runner_url: "https://gitlab.example.com"
+
+# Keep the runner on the same major.minor release as that GitLab — the
+# combination GitLab supports.
+gitlab_runner_version: "19.5.0-1"
+
+# A GitLab whose certificate no public CA signed has to be trusted explicitly,
+# or every call the runner makes is refused. Point this at the PEM file, on
+# the controller, that the GitLab host serves:
+#   scp gitlab-01:/etc/gitlab/ssl/gitlab.example.com.crt files/
+# gitlab_runner_ca_certificate_src: "files/gitlab.example.com.crt"
+
+# --------------------------------------------------------------------------
+# How the runner authenticates
+# --------------------------------------------------------------------------
+#
+# Registration tokens no longer exist. The role creates the runner through
+# GitLab's API and uses the authentication token that call returns, which
+# needs a personal or group access token with the create_runner scope:
+#   ansible-vault encrypt_string --name vault_gitlab_create_runner_token '<value>'
+#
+# A host that is already registered keeps its own token, so re-running this
+# never creates a second runner for it.
+
+# gitlab_runner_api_token: "{{ vault_gitlab_create_runner_token }}"
+
+# Or, for a runner you created in GitLab's UI yourself:
+# gitlab_runner_authentication_token: "{{ vault_gitlab_runner_token }}"
+
+# --------------------------------------------------------------------------
+# What this runner is, in GitLab
+# --------------------------------------------------------------------------
+
+# "instance" offers it to every project, "group" or "project" scopes it. A
+# group or project is named by numeric ID or by full path.
+gitlab_runner_scope: "group"
+gitlab_runner_group: "platform/infra"
+
+gitlab_runner_description: "{{ ansible_facts['hostname'] }}"
+gitlab_runner_tags:
+  - docker
+gitlab_runner_run_untagged: true
+
+# Reserves this runner for protected branches and tags — which is what you
+# want for a runner that holds deployment credentials, and overkill for one
+# that only runs tests.
+gitlab_runner_access_level: "not_protected"
+
+# --------------------------------------------------------------------------
+# Capacity and the docker executor
+# --------------------------------------------------------------------------
+
+# Roughly one job per core, then watch the load: every job is at least one
+# container.
+gitlab_runner_concurrent: 4
+
+gitlab_runner_executor: "docker"
+gitlab_runner_docker_image: "alpine:3.21"
+
+# Docker-in-Docker needs this, and it means any job here can take over the
+# host. Give privileged jobs a runner of their own.
+gitlab_runner_docker_privileged: false
+
+# --------------------------------------------------------------------------
+# The Docker engine
+# --------------------------------------------------------------------------
+
+gitlab_runner_docker_engine_install: true
+
+# Membership of the docker group is equivalent to root on this host. The
+# runner service runs as root and needs none of it; add a human deliberately.
+gitlab_runner_docker_engine_users: []

@@ -1,0 +1,91 @@
+---
+# Builds the GitLab first, then hands the runner two things it cannot invent:
+# the certificate to trust, and an access token with the create_runner scope.
+# Both come off the GitLab host itself, so the scenario needs nothing
+# pre-seeded and tests the path an operator actually takes.
+
+- name: Build the GitLab the runner will attach to
+  hosts: gitlab_servers
+  gather_facts: true
+
+  tasks:
+    # https with a certificate the role generates, which is the configuration
+    # a runner is hardest to get right against — and the reason this scenario
+    # builds a real GitLab instead of mocking one.
+    - name: Install and configure GitLab
+      ansible.builtin.include_role:
+        name: gitlab
+      vars:
+        gitlab_external_url: "https://{{ gitlab_runner_test_hostname }}"
+        gitlab_tls_certificate_source: "self-signed"
+        gitlab_tls_self_signed_extra_sans:
+          - "IP:{{ gitlab_runner_test_gitlab_ip }}"
+        # Obviously not a secret: it is in a public repository.
+        gitlab_initial_root_password: "MoleculeTestPassword123!"
+        # Sized for a test VM. The registry and the agent server are off
+        # because nothing here uses them, and each costs memory and
+        # reconfigure time on a host with little of either to spare.
+        gitlab_puma_worker_processes: 2
+        gitlab_puma_per_worker_max_memory_mb: 1200
+        gitlab_sidekiq_max_concurrency: 5
+        gitlab_postgresql_shared_buffers: "256MB"
+        gitlab_prometheus_enabled: false
+        gitlab_node_exporter_enabled: false
+        gitlab_kas_enabled: false
+        # Vagrant hands Ansible a forwarded 127.0.0.1, so the reachability
+        # check has to dial the VM's own address instead.
+        gitlab_validate_reachable_address: "{{ gitlab_runner_test_gitlab_ip }}"
+        gitlab_validate_retries: 90
+        gitlab_validate_delay: 10
+
+    - name: Read the certificate GitLab generated for itself
+      ansible.builtin.slurp:
+        src: "/etc/gitlab/ssl/{{ gitlab_runner_test_hostname }}.crt"
+      become: true
+      register: gitlab_runner_test_certificate
+
+    - name: Publish that certificate for the runner play
+      ansible.builtin.set_fact:
+        gitlab_runner_test_ca_certificate: "{{ gitlab_runner_test_certificate.content | b64decode }}"
+
+    # What an operator does in the UI — Settings > Access Tokens with the
+    # create_runner scope — done from the Rails console, because a Molecule
+    # run has nobody to click it.
+    - name: Mint an access token with the create_runner scope
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/gitlab-rails
+          - runner
+          - |
+            user = User.find_by_username('root')
+            token = user.personal_access_tokens.create!(
+              name: "molecule-#{Time.now.to_i}",
+              scopes: ['api', 'create_runner'],
+              expires_at: 30.days.from_now
+            )
+            puts token.token
+      become: true
+      register: gitlab_runner_test_pat
+      changed_when: true
+      no_log: true
+
+    - name: Publish that token for the runner play
+      ansible.builtin.set_fact:
+        gitlab_runner_test_api_token: "{{ gitlab_runner_test_pat.stdout_lines | last | trim }}"
+      no_log: true
+
+- name: Install the runner and register it with that GitLab
+  hosts: gitlab_runners
+  gather_facts: true
+
+  tasks:
+    - name: Install, configure and register GitLab Runner
+      ansible.builtin.include_role:
+        name: gitlab_runner
+      vars:
+        # Both taken off the GitLab host in the play above. The certificate is
+        # what lets the runner speak to GitLab at all; the token is used once,
+        # to create the runner, and never written to this host.
+        gitlab_runner_ca_certificate_content: "{{ hostvars['gitlab-server']['gitlab_runner_test_ca_certificate'] }}"
+        gitlab_runner_api_token: "{{ hostvars['gitlab-server']['gitlab_runner_test_api_token'] }}"
+        gitlab_runner_scope: "instance"

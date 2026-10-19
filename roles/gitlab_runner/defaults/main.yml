@@ -1,0 +1,308 @@
+---
+# defaults file for gitlab_runner
+#
+# Everything in here is meant to be overridden from inventory, group_vars or
+# host_vars. Values the role derives itself (package names, paths, the parsed
+# URL) live in vars/ instead and are deliberately not overridable.
+#
+# One runner per host. A host with several [[runners]] sections is a different
+# shape of deployment and deliberately out of scope — run this role against
+# several hosts, or raise gitlab_runner_concurrent to run more jobs on one.
+
+# --------------------------------------------------------------------------
+# What the role does
+# --------------------------------------------------------------------------
+
+gitlab_runner_preflight_enabled: true
+gitlab_runner_validate_enabled: true
+
+# Install the Docker engine as well. The docker executor cannot work without
+# one, and the preflight checks refuse that combination rather than letting
+# the runner come up and fail every job.
+gitlab_runner_docker_engine_install: true
+
+# --------------------------------------------------------------------------
+# The GitLab this runner belongs to
+# --------------------------------------------------------------------------
+
+# Base URL of the GitLab instance, e.g. "https://gitlab.example.com". No
+# default: pointing a runner at the wrong GitLab is not something to guess at.
+gitlab_runner_url: ""
+
+# A GitLab with a certificate no public CA signed — a self-signed one, or your
+# own internal CA — has to be trusted by the runner explicitly. Supply the
+# certificate either as a file on the controller or as content, and the role
+# installs it where the runner looks for it:
+# /etc/gitlab-runner/certs/<host>.crt. The runner reads that file on every
+# call to GitLab, and hands it to the job's git through CI_SERVER_TLS_CA_FILE,
+# so clones inside jobs work too. PEM only; concatenate a chain into one file.
+gitlab_runner_ca_certificate_src: ""
+gitlab_runner_ca_certificate_content: ""
+
+# Set this instead when you manage the CA file on the host yourself: it is
+# written into config.toml as tls-ca-file and overrides the convention above.
+gitlab_runner_tls_ca_file: ""
+
+# --------------------------------------------------------------------------
+# Release
+# --------------------------------------------------------------------------
+
+# The package release to converge on, e.g. "19.5.0-1". Leave it empty to
+# install whatever the repository calls newest. Pin it, and keep it on the
+# same major.minor as the GitLab it talks to — that is what GitLab supports.
+gitlab_runner_version: ""
+
+# Hold the package in dpkg, so unattended-upgrades cannot move the runner to
+# a release your pipelines have not seen.
+gitlab_runner_package_hold: true
+
+# --------------------------------------------------------------------------
+# How the runner gets its token
+# --------------------------------------------------------------------------
+#
+# Since GitLab 16.0 a runner is created first and registered second: creating
+# it returns an authentication token ("glrt-..."), which is the only thing the
+# runner needs. The old registration tokens are gone, so there is nothing to
+# look up on a group or project any more.
+#
+# Three ways to supply it, in the order the role tries them:
+#
+#   1. a token already in /etc/gitlab-runner/config.toml on the host — which
+#      is what makes a second run change nothing;
+#   2. gitlab_runner_authentication_token, for a runner you created in the UI;
+#   3. gitlab_runner_api_token, with which the role creates the runner through
+#      the API and reads the token out of the answer.
+
+# A "glrt-" token. Keep it in Ansible Vault.
+gitlab_runner_authentication_token: ""
+
+# A personal or group access token with the create_runner scope, held by
+# someone with permission on the target. Used once, to create the runner —
+# never written to the host. Keep it in Ansible Vault, and prefer a group
+# access token scoped to the group you are registering into.
+gitlab_runner_api_token: ""
+
+# Verification of GitLab's certificate for that one API call. Leave it on; for
+# a self-signed GitLab, supply the certificate above instead of turning this
+# off — the role points the API call at it.
+gitlab_runner_api_validate_certs: true
+
+# What the runner is attached to: "instance" (available to every project),
+# "group" or "project".
+gitlab_runner_scope: "instance"
+
+# The group or project to attach to, as a numeric ID or a full path
+# ("platform/infra" — the role URL-encodes it). Required for those scopes.
+gitlab_runner_group: ""
+gitlab_runner_project: ""
+
+# --------------------------------------------------------------------------
+# What the runner looks like in GitLab
+# --------------------------------------------------------------------------
+#
+# These are properties of the runner GitLab holds, not of the local service,
+# so they are applied when the runner is created and changing them afterwards
+# is a job for GitLab's UI or API — the role will not recreate a runner to
+# move a tag.
+
+gitlab_runner_description: "{{ ansible_facts['hostname'] }}"
+
+# Tags a job has to ask for to land here. Empty, with run_untagged true, takes
+# any job.
+gitlab_runner_tags: []
+gitlab_runner_run_untagged: true
+
+# Lock the runner to its project, so it cannot be assigned elsewhere.
+gitlab_runner_locked: false
+
+# "not_protected" or "ref_protected". The latter keeps the runner away from
+# everything but protected branches and tags, which is what you want for a
+# runner that holds deployment credentials.
+gitlab_runner_access_level: "not_protected"
+
+gitlab_runner_paused: false
+
+# Longest a job may run here, in seconds. 0 leaves GitLab's own limit alone.
+gitlab_runner_maximum_timeout: 0
+
+gitlab_runner_maintenance_note: ""
+
+# --------------------------------------------------------------------------
+# config.toml — global
+# --------------------------------------------------------------------------
+
+# Jobs this host runs at once, across all executors. Start at roughly one per
+# core and watch the load; every job is at least one container.
+gitlab_runner_concurrent: 4
+
+# Seconds between asking GitLab for work.
+gitlab_runner_check_interval: 3
+
+gitlab_runner_log_level: "info"
+gitlab_runner_log_format: "runner"
+
+# Anything else that belongs at the top of config.toml.
+gitlab_runner_global_extra_configuration: {}
+
+# --------------------------------------------------------------------------
+# config.toml — this runner
+# --------------------------------------------------------------------------
+
+# "docker" is what this role is built for; "shell" runs jobs directly on the
+# host, which means every job can do anything the runner can.
+gitlab_runner_executor: "docker"
+
+# Jobs this one runner takes at once. 0 means no limit of its own, bounded
+# only by gitlab_runner_concurrent.
+gitlab_runner_limit: 0
+
+gitlab_runner_request_concurrency: 1
+
+# Largest job log the runner will hand back, in kilobytes.
+gitlab_runner_output_limit: 4096
+
+# Variables every job on this runner gets, as "KEY=value" strings.
+gitlab_runner_environment: []
+
+# Anything else that belongs in the [[runners]] section.
+gitlab_runner_extra_configuration: {}
+
+# --------------------------------------------------------------------------
+# config.toml — the docker executor
+# --------------------------------------------------------------------------
+
+# Image for jobs that do not name one themselves.
+gitlab_runner_docker_image: "alpine:3.21"
+
+# Privileged containers. Off, and worth understanding before turning on: a
+# privileged job container can do anything to the host it runs on, including
+# reading every other job's secrets. Docker-in-Docker needs it; a rootless
+# alternative or a dedicated, disposable runner host is the safer answer.
+gitlab_runner_docker_privileged: false
+
+# Mounted into every job container. /cache is where the runner keeps its own
+# cache volume.
+gitlab_runner_docker_volumes:
+  - "/cache"
+
+# "always", "if-not-present" or "never", as a list in the order to try.
+# "always" costs a registry round trip per job and is what you want when tags
+# like :latest move under you.
+gitlab_runner_docker_pull_policy:
+  - "if-not-present"
+
+# Verification of the *Docker daemon's* TLS, not GitLab's. Only relevant when
+# the runner talks to a remote daemon over TCP.
+gitlab_runner_docker_tls_verify: false
+
+# /dev/shm inside job containers, in bytes. 0 leaves Docker's default, which
+# is 64 MB — enough until a browser test suite says otherwise.
+gitlab_runner_docker_shm_size: 0
+
+# Restrict which images jobs may run, as a list of patterns. Empty allows any.
+gitlab_runner_docker_allowed_images: []
+gitlab_runner_docker_allowed_services: []
+
+gitlab_runner_docker_network_mode: ""
+
+# Anything else that belongs in [runners.docker].
+gitlab_runner_docker_extra_configuration: {}
+
+# --------------------------------------------------------------------------
+# config.toml — distributed cache
+# --------------------------------------------------------------------------
+#
+# Without this every runner keeps its cache on its own disk, so a job that
+# lands on another host starts cold. Point it at object storage to share.
+
+# "" (local disk), or "s3".
+gitlab_runner_cache_type: ""
+gitlab_runner_cache_shared: false
+gitlab_runner_cache_path: ""
+
+# Settings for [runners.cache.s3], e.g.:
+#   gitlab_runner_cache_s3:
+#     ServerAddress: "minio.example.com"
+#     BucketName: "runner-cache"
+#     AccessKey: "{{ vault_runner_cache_access_key }}"
+#     SecretKey: "{{ vault_runner_cache_secret_key }}"
+#     Insecure: false
+gitlab_runner_cache_s3: {}
+
+# --------------------------------------------------------------------------
+# config.toml — escape hatch
+# --------------------------------------------------------------------------
+
+# Raw TOML appended verbatim, for the rare section the variables above do not
+# cover. Never parsed by the role.
+gitlab_runner_raw_configuration: ""
+
+# --------------------------------------------------------------------------
+# The Docker engine
+# --------------------------------------------------------------------------
+
+gitlab_runner_docker_engine_repository_url: "https://download.docker.com/linux/ubuntu"
+gitlab_runner_docker_engine_gpg_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+gitlab_runner_docker_engine_suite: "{{ ansible_facts['distribution_release'] }}"
+gitlab_runner_docker_engine_components: "stable"
+
+gitlab_runner_docker_engine_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Accounts added to the docker group. Empty on purpose: membership of that
+# group is equivalent to root on this host, and the runner service already
+# runs as root, so it needs nothing. Add a human here only deliberately.
+gitlab_runner_docker_engine_users: []
+
+# Rendered to /etc/docker/daemon.json. Log rotation is here because the
+# default is none: a long-running job's logs otherwise fill the disk.
+gitlab_runner_docker_engine_daemon_configuration:
+  log-driver: "json-file"
+  log-opts:
+    max-size: "50m"
+    max-file: "3"
+  live-restore: true
+
+# --------------------------------------------------------------------------
+# Hardware the preflight checks
+# --------------------------------------------------------------------------
+#
+# A runner's appetite is its jobs', so these are a floor rather than a
+# recommendation: two cores and 2 GB runs a handful of small jobs, and
+# anything that compiles wants more.
+
+gitlab_runner_preflight_min_cpu: 2
+gitlab_runner_preflight_min_memory_mb: 1900
+gitlab_runner_preflight_min_disk_free_mb: 20480
+
+# Images, layers and build caches all land under /var/lib/docker, and it fills
+# up quietly until a job fails with no space left.
+gitlab_runner_preflight_disk_paths:
+  - "/var/lib/docker"
+  - "/home/gitlab-runner"
+
+gitlab_runner_preflight_check_url_reachable: true
+
+# --------------------------------------------------------------------------
+# Validation
+# --------------------------------------------------------------------------
+
+gitlab_runner_validate_check_service: true
+
+# `gitlab-runner verify`, which asks GitLab whether this runner's token is
+# still good. The check that catches a revoked or expired token, and the
+# reason this role does not need to guess.
+gitlab_runner_validate_check_registration: true
+
+gitlab_runner_validate_check_docker: true
+
+# Run a throwaway container with the configured default image, which is the
+# only check that proves a job could actually start here. Pulls that image if
+# it is not present yet.
+gitlab_runner_validate_run_container: true
+
+gitlab_runner_debug: false

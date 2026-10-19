@@ -1,0 +1,32 @@
+---
+# Deliberately short, and nothing here prints the token.
+
+- name: "ALL | Print the runner report"
+  ansible.builtin.debug:
+    msg:
+      - "GitLab              : {{ gitlab_runner_url }}"
+      - "Runner              : {{ gitlab_runner_description }}"
+      - "Scope               : {{ gitlab_runner_scope_description | trim }}"
+      - "Runner ID in GitLab : {{ gitlab_runner_created_id | default('', true) | default('existing runner', true) }}"
+      - "Token came from     : {{ gitlab_runner_token_source }}"
+      - "Installed release   : {{ gitlab_runner_installed_version | default('unknown', true) }}"
+      - "Executor            : {{ gitlab_runner_executor }}{{ ', default image ' ~ gitlab_runner_docker_image if gitlab_runner_executor == 'docker' else '' }}"
+      - "Privileged jobs     : {{ 'yes — a job can take over this host' if gitlab_runner_docker_privileged | bool else 'no' }}"
+      - "Concurrent jobs     : {{ gitlab_runner_concurrent }}"
+      - "Tags                : {{ gitlab_runner_tags | join(', ') | default('none, takes untagged jobs', true) }}"
+      - "GitLab certificate  : {{ gitlab_runner_tls_ca_file_effective | trim | default('from the host trust store', true) }}"
+      - "Tags and access level are properties GitLab holds: change them in GitLab, not here."
+
+- name: "ALL | Collect the full runner state for the debug report"
+  ansible.builtin.command:
+    argv: ["{{ gitlab_runner_command }}", list]
+  become: true
+  register: gitlab_runner_report_list
+  changed_when: false
+  failed_when: false
+  when: gitlab_runner_debug | bool
+
+- name: "ALL | Print the full runner state"
+  ansible.builtin.debug:
+    msg: "{{ (gitlab_runner_report_list.stdout_lines | default([])) + (gitlab_runner_report_list.stderr_lines | default([])) }}"
+  when: gitlab_runner_debug | bool

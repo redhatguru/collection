@@ -1,0 +1,63 @@
+---
+# A GitLab Runner on one Ubuntu host, with the Docker engine under it and the
+# docker executor on top, registered to an instance, group or project.
+#
+# The order matters in two places: the certificate is installed before
+# anything talks to GitLab, because on an instance with a self-signed
+# certificate nothing can otherwise; and the token is resolved before the
+# configuration is written, because the token is the only thing in that file
+# the role cannot derive.
+
+- name: "ALL | Verify this host can carry a runner"
+  ansible.builtin.include_tasks: preflight.yml
+  tags: preflight
+  when: gitlab_runner_preflight_enabled | bool
+
+- name: "ALL | Prepare the operating system"
+  ansible.builtin.include_tasks: os.yml
+  tags: os
+
+- name: "ALL | Ensure the official GitLab Runner repository is available"
+  ansible.builtin.include_tasks: repository.yml
+  tags: repository
+
+- name: "ALL | Ensure the Docker engine is installed and running"
+  ansible.builtin.include_tasks: docker.yml
+  tags: docker
+  when: gitlab_runner_docker_engine_install | bool
+
+- name: "ALL | Ensure GitLab Runner is installed"
+  ansible.builtin.include_tasks: install.yml
+  tags: install
+
+# Before anything calls GitLab: the API call that creates the runner and the
+# runner itself both verify the certificate, and on an instance no public CA
+# signed for, both fail without this.
+- name: "ALL | Ensure the runner trusts GitLab's certificate"
+  ansible.builtin.include_tasks: certificate.yml
+  tags: certificate
+  when: gitlab_runner_ca_certificate_supplied | bool
+
+- name: "ALL | Resolve the authentication token this runner registers with"
+  ansible.builtin.include_tasks: token.yml
+  tags: token
+
+- name: "ALL | Ensure the runner configuration matches the role's variables"
+  ansible.builtin.include_tasks: configure.yml
+  tags: config
+
+# Flushed here rather than at the end of the play: the validation below asks
+# GitLab whether this runner is registered, and that has to be a runner
+# running the configuration this run just wrote.
+- name: "ALL | Apply any pending restarts before using the runner"
+  ansible.builtin.meta: flush_handlers
+  tags: always
+
+- name: "ALL | Verify the runner is registered and able to run jobs"
+  ansible.builtin.include_tasks: validate.yml
+  tags: validate
+  when: gitlab_runner_validate_enabled | bool
+
+- name: "ALL | Print the runner report"
+  ansible.builtin.include_tasks: report.yml
+  tags: report
