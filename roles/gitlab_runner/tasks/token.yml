@@ -50,6 +50,10 @@
     validate_certs: "{{ gitlab_runner_api_validate_certs | bool }}"
     ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_in_place | bool else omit }}"
     timeout: 30
+  # Reads the certificate the role installed under /etc/gitlab-runner, which
+  # the package keeps root-only — without this the call fails before it is
+  # made, with EACCES rather than anything about TLS.
+  become: true
   register: gitlab_runner_scope_lookup
   # The request carries the access token in a header.
   no_log: true
@@ -93,6 +97,9 @@
     # self-signed GitLab needs no exception here.
     ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_in_place | bool else omit }}"
     timeout: 30
+  # Same reason as the lookup above: the CA file lives in a root-only
+  # directory.
+  become: true
   register: gitlab_runner_api_response
   # The answer contains the token.
   no_log: true

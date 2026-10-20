@@ -49,14 +49,18 @@ gitlab_runner_ca_certificate_content: ""
 # installed, and pinning one file for it would break the day the chain
 # changes. The fetch is for the case where verification fails.
 #
-# Understand what it is before relying on it. Asking a server for the
-# certificate you will then trust it by is trust-on-first-use: whoever
-# answers that first connection becomes permanently trusted, and the access
-# token that creates the runner travels over it. On a network where that
-# matters, either copy the certificate out of band (the two variables above)
-# or pin the fingerprint below, which turns the fetch into a verification
-# rather than an act of faith.
-gitlab_runner_ca_certificate_fetch: true
+# Off by default, and deliberately so. Asking a server for the certificate you
+# will then trust it by is trust-on-first-use: whoever answers that first
+# connection becomes permanently trusted, and the access token that creates
+# the runner travels over it. That is a trade worth making on a network you
+# control and a bad one to inherit without noticing, so it is a choice this
+# role asks for rather than makes.
+#
+# Set it true and the convenience is yours; pin the fingerprint below as well
+# and it stops being a matter of trust at all. When no fingerprint is pinned,
+# the run prints the one it accepted so you can check it afterwards and pin
+# it.
+gitlab_runner_ca_certificate_fetch: false
 
 # SHA-256 fingerprint the fetched certificate has to match, as openssl prints
 # it ("AA:BB:CC:..." — case and colons are ignored). Read it off the GitLab

@@ -18,9 +18,9 @@ What it delivers, in one run, with no manual step afterwards:
   runner's whole configuration is one reviewable file
 - The **runner created through GitLab's API**, which is where its
   authentication token comes from — see [section 4](#4-the-token)
-- The **certificate of a GitLab no public CA signed for** fetched with
-  `openssl` and installed where the runner looks for it, so both the runner
-  and the git inside its jobs trust it with no file to copy by hand
+- The **certificate of a GitLab no public CA signed for** installed where the
+  runner looks for it — supplied, or fetched with `openssl` when you ask for
+  that — so both the runner and the git inside its jobs trust it
 - **Verification**: GitLab itself confirms the runner is registered, a
   throwaway container proves a job could actually start, and both systemd
   units are checked to be enabled so the host comes back as a working runner
@@ -162,7 +162,7 @@ and are deliberately not overridable.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `gitlab_runner_url` | `""` | Base URL of the GitLab instance. Required |
-| `gitlab_runner_ca_certificate_fetch` | `true` | Fetch GitLab's certificate with openssl when the host's trust store cannot verify it — see [section 7](#7-a-gitlab-with-a-self-signed-certificate) |
+| `gitlab_runner_ca_certificate_fetch` | `false` | Fetch GitLab's certificate with openssl when the host's trust store cannot verify it — see [section 7](#7-a-gitlab-with-a-self-signed-certificate) |
 | `gitlab_runner_ca_certificate_fingerprint` | `""` | SHA-256 the fetched certificate must match |
 | `gitlab_runner_ca_certificate_src` / `_content` | `""` | A certificate you supply instead of fetching |
 | `gitlab_runner_version` | `""` | Package release, e.g. `19.5.0-1`. Empty installs the newest |
@@ -243,7 +243,7 @@ registers nothing. The role handles it without a manual step:
 
 ```yaml
 gitlab_runner_url: "https://gitlab.devlab.local"
-# gitlab_runner_ca_certificate_fetch: true   # the default
+gitlab_runner_ca_certificate_fetch: true
 ```
 
 The certificate is fetched with `openssl s_client -showcerts`, so an internal
@@ -258,12 +258,17 @@ store already verifies that GitLab; when it does, nothing is installed and
 the message says so — an instance with a publicly signed certificate needs no
 pinned file, and pinning one would break the day its chain changes.
 
-### What fetching actually means
+### Why fetching is off by default
 
 Asking a server for the certificate you will then trust it by is
 **trust-on-first-use**. Whoever answers that first connection becomes
 permanently trusted, and the access token that creates the runner travels
-over it. On a network where that matters, close the gap in one of two ways.
+over it. That is a reasonable trade on a network you control and a bad one to
+inherit without noticing, so the role asks for it rather than assuming it —
+hence `gitlab_runner_ca_certificate_fetch: true` above.
+
+With nothing pinned, the run prints the fingerprint it accepted, so there is
+one place to notice what was trusted. Close the gap in one of two ways.
 
 Pin the fingerprint, which turns the fetch into a verification:
 
@@ -276,7 +281,11 @@ sudo openssl x509 -in /etc/gitlab/ssl/gitlab.devlab.local.crt -noout -fingerprin
 gitlab_runner_ca_certificate_fingerprint: "AA:BB:CC:…"   # case and colons ignored
 ```
 
-Nothing is registered unless the certificate on the host matches it.
+The fingerprint is read from what came over the wire **before anything is
+written**, so a certificate that does not match leaves nothing behind on the
+host — and nothing is registered either. The whole chain the server sent is
+installed, not only the leaf whose fingerprint was checked: an internal CA's
+intermediates are what make the leaf verifiable.
 
 Or copy the certificate out of band and skip the fetch entirely:
 
