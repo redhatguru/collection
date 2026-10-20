@@ -194,13 +194,19 @@
 # swap that only exists because someone ran swapon all look healthy until the
 # next reboot.
 
+# ufw is only asked about when this role owns its state. With
+# gitlab_firewall_manage_state false the role adds rules and deliberately
+# leaves the firewall's state to whoever does own it, so demanding it be on
+# would fail a run over a decision the operator already made.
 - name: "ALL | Check which units would start GitLab and its firewall at boot"
   ansible.builtin.command:
     argv: [systemctl, is-enabled, "{{ item }}"]
   register: gitlab_validate_boot_units
   changed_when: false
   failed_when: false
-  loop: "{{ [gitlab_runsvdir_service_name] + (['ufw'] if gitlab_firewall_enabled | bool else []) }}"
+  loop: >-
+    {{ [gitlab_runsvdir_service_name]
+       + (['ufw'] if (gitlab_firewall_enabled | bool and gitlab_firewall_manage_state | bool) else []) }}
   loop_control:
     label: "{{ item }}"
   when: gitlab_validate_check_boot | bool
@@ -208,24 +214,71 @@
 - name: "ALL | Ensure GitLab and its firewall are started at boot"
   ansible.builtin.assert:
     that:
-      # "enabled" and "enabled-runtime" both start it; "static" and "alias"
-      # are units something else pulls in, which is equally fine.
-      - item.stdout | trim in ['enabled', 'enabled-runtime', 'static', 'alias', 'indirect']
+      # Only "enabled" answers the question this check asks. The other states
+      # systemd can return are not equivalent:
+      #
+      #   enabled-runtime  the symlink lives in /run, which is empty after a
+      #                    reboot — enabled until exactly the moment that
+      #                    matters here;
+      #   static           the unit has no [Install] section and cannot be
+      #                    enabled, so whether it starts depends on something
+      #                    else pulling it in;
+      #   alias, indirect  the real state belongs to another unit.
+      #
+      # Accepting any of those would turn this into a check that passes on a
+      # host that does not come back.
+      - item.stdout | trim == 'enabled'
     fail_msg: >-
       systemd reports '{{ item.item }}' as
-      '{{ item.stdout | default('missing') | trim }}', so it would not start
-      after a reboot — GitLab
-      {{ 'would not come back at all' if item.item == gitlab_runsvdir_service_name
-         else 'would come back with no firewall in front of it' }}.
+      '{{ item.stdout | default('missing') | trim }}' rather than 'enabled',
+      so it would not be started at boot and
+      {{ 'GitLab would not come back at all' if item.item == gitlab_runsvdir_service_name
+         else 'the host would come back with its firewall unit not started' }}.
       Enable it with `sudo systemctl enable --now {{ item.item }}`, or let this
       role do it: gitlab_service_enabled covers
-      {{ gitlab_runsvdir_service_name }}, and the firewall's unit is enabled by
-      the firewall tasks.
+      {{ gitlab_runsvdir_service_name }}, and the firewall tasks enable ufw.
     quiet: true
   loop: "{{ gitlab_validate_boot_units.results | default([]) }}"
   loop_control:
     label: "{{ item.item }}"
   when: gitlab_validate_check_boot | bool
+
+# The unit being enabled is only half of it: ufw keeps its own switch in
+# /etc/ufw/ufw.conf, and `ufw disable` flips that without touching the unit.
+# A host can therefore have ufw.service enabled and no firewall at all — so
+# the unit check alone would report a firewall that is not there, before or
+# after a reboot.
+- name: "ALL | Check whether the firewall is actually loaded"
+  ansible.builtin.command:
+    argv: [ufw, status]
+  become: true
+  register: gitlab_validate_firewall_state
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_validate_check_boot | bool
+    - gitlab_firewall_enabled | bool
+    - gitlab_firewall_manage_state | bool
+
+- name: "ALL | Ensure the firewall is on, not merely installed"
+  ansible.builtin.assert:
+    that:
+      # Quoted, because the colon in 'Status: active' would otherwise make
+      # YAML read this whole line as a mapping rather than a condition.
+      - "gitlab_validate_firewall_state.stdout | default('') is search('Status: active')"
+    fail_msg: >-
+      ufw reports '{{ gitlab_validate_firewall_state.stdout | default('nothing') | trim | truncate(60) }}'.
+      Its systemd unit can be enabled while ufw itself is switched off in
+      /etc/ufw/ufw.conf — `ufw disable` does exactly that — so GitLab is
+      serving with no firewall in front of it. Re-run with
+      gitlab_firewall_enabled and gitlab_firewall_manage_state true to turn it
+      back on, or set gitlab_firewall_manage_state false if something else
+      owns this host's firewall.
+    quiet: true
+  when:
+    - gitlab_validate_check_boot | bool
+    - gitlab_firewall_enabled | bool
+    - gitlab_firewall_manage_state | bool
 
 - name: "ALL | Check whether anything mounts this host's swap at boot"
   ansible.builtin.command:

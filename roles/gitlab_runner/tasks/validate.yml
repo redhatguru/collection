@@ -123,12 +123,16 @@
 - name: "ALL | Ensure the runner and Docker are started at boot"
   ansible.builtin.assert:
     that:
-      - item.stdout | trim in ['enabled', 'enabled-runtime', 'static', 'alias', 'indirect']
+      # Only "enabled" answers this. "enabled-runtime" lives in /run and is
+      # gone after a reboot — enabled until the moment that matters — and
+      # "static", "alias" and "indirect" all mean the unit's own boot
+      # behaviour depends on something else.
+      - item.stdout | trim == 'enabled'
     fail_msg: >-
       systemd reports '{{ item.item }}' as
-      '{{ item.stdout | default('missing') | trim }}', so it would not start
-      after a reboot and this host would come back with the software installed
-      but no runner taking jobs. Enable it with
+      '{{ item.stdout | default('missing') | trim }}' rather than 'enabled',
+      so it would not be started at boot and this host would come back with
+      the software installed but no runner taking jobs. Enable it with
       `sudo systemctl enable --now {{ item.item }}`, or let the role do it:
       gitlab_runner_service_enabled covers both units.
     quiet: true
