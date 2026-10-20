@@ -166,3 +166,29 @@ gitlab_runner_scope_description: >-
 gitlab_runner_certificate_pem_blocks: >-
   {{ gitlab_runner_certificate_fetch.stdout | default('')
      | regex_findall('-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----') }}
+
+# What a status code from GitLab's API means for this particular call. The
+# calls themselves are censored — one carries the access token in a header,
+# the other returns a token — so this is the whole diagnosis an operator gets,
+# and each branch names the thing to change. Each assert declares which status
+# it is explaining by setting gitlab_runner_api_status.
+gitlab_runner_api_explanations:
+  0: >-
+    No answer at all: the call did not reach GitLab.
+  401: >-
+    GitLab rejected the token in gitlab_runner_api_token: it is unknown,
+    expired or revoked. On a first run this is usually the placeholder still
+    being in place.
+  403: >-
+    The token is valid but not allowed to do this. It needs the create_runner
+    scope, and the account that owns it needs Owner on the group (or
+    Maintainer on the project) it is registering into.
+  404: >-
+    Nothing of that name is visible to this token — check the full path as it
+    appears in the URL ("platform/infra", not the display name), and that the
+    token's owner can see it. A 404 on the create call means something else:
+    that this GitLab predates 16.0 and has no POST /user/runners.
+
+gitlab_runner_api_diagnosis: >-
+  {{ gitlab_runner_api_explanations[gitlab_runner_api_status | int]
+     | default('GitLab answered something this role has no advice for.', true) | trim }}

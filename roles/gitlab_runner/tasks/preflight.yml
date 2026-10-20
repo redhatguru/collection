@@ -153,6 +153,30 @@
       nothing to read off a group or project.
     quiet: true
 
+# A placeholder gets through every check that only asks whether a token is
+# set, and then costs a full run — Docker, the runner, a fetched certificate —
+# before GitLab answers 401. Cheaper to say so now.
+- name: "ALL | Ensure the access token is a real one rather than a placeholder"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_api_token not in gitlab_runner_api_token_placeholders
+      - gitlab_runner_api_token | length >= 20
+    fail_msg: >-
+      gitlab_runner_api_token is still a placeholder, or too short to be a
+      GitLab token (they are around 26 characters). Create one in GitLab —
+      your avatar > Edit profile > Access tokens, scope create_runner — and
+      keep it in Ansible Vault:
+      `ansible-vault encrypt_string --name vault_gitlab_create_runner_token '<value>'`.
+      Nothing is installed on this host until it is set.
+    quiet: true
+  vars:
+    gitlab_runner_api_token_placeholders:
+      - "ChangeMe"
+      - "ChangeMe123!"
+      - "changeme"
+      - "glpat-xxxxxxxxxxxxxxxxxxxx"
+  when: gitlab_runner_api_token | length > 0
+
 - name: "ALL | Ensure a supplied authentication token is the right kind of token"
   ansible.builtin.assert:
     that:

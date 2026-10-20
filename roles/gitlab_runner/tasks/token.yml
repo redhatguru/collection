@@ -50,6 +50,10 @@
     validate_certs: "{{ gitlab_runner_api_validate_certs | bool }}"
     ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_in_place | bool else omit }}"
     timeout: 30
+    # Judged below rather than here: GitLab's status code is the only
+    # diagnosis available for a call whose output cannot be shown, and 401,
+    # 403 and 404 each mean something different and actionable.
+    status_code: [200]
   # Reads the certificate the role installed under /etc/gitlab-runner, which
   # the package keeps root-only — without this the call fails before it is
   # made, with EACCES rather than anything about TLS.
@@ -57,6 +61,26 @@
   register: gitlab_runner_scope_lookup
   # The request carries the access token in a header.
   no_log: true
+  failed_when: false
+  when:
+    - gitlab_runner_create_needed | bool
+    - gitlab_runner_scope in ['group', 'project']
+    - not gitlab_runner_scope_target_is_id | bool
+
+# Deliberately not no_log: it reads only the status code, so it can say what
+# went wrong where the call itself has to stay censored.
+- name: "ALL | Ensure GitLab accepted the lookup"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_scope_lookup.status | default(0) == 200
+    fail_msg: >-
+      Looking up {{ gitlab_runner_scope }} '{{ gitlab_runner_scope_target | trim }}'
+      on {{ gitlab_runner_url }} returned
+      {{ gitlab_runner_scope_lookup.status | default('no response') }}.
+      {{ gitlab_runner_api_diagnosis }}
+    quiet: true
+  vars:
+    gitlab_runner_api_status: "{{ gitlab_runner_scope_lookup.status | default(0) }}"
   when:
     - gitlab_runner_create_needed | bool
     - gitlab_runner_scope in ['group', 'project']
@@ -103,6 +127,20 @@
   register: gitlab_runner_api_response
   # The answer contains the token.
   no_log: true
+  failed_when: false
+  when: gitlab_runner_create_needed | bool
+
+- name: "ALL | Ensure GitLab created the runner"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_api_response.status | default(0) in [200, 201]
+    fail_msg: >-
+      Creating the runner on {{ gitlab_runner_url }} returned
+      {{ gitlab_runner_api_response.status | default('no response') }}.
+      {{ gitlab_runner_api_diagnosis }}
+    quiet: true
+  vars:
+    gitlab_runner_api_status: "{{ gitlab_runner_api_response.status | default(0) }}"
   when: gitlab_runner_create_needed | bool
 
 - name: "ALL | Decide which token this runner uses"
