@@ -283,9 +283,29 @@ gitlab_runner_ca_certificate_fingerprint: "AA:BB:CC:…"   # case and colons ign
 
 The fingerprint is read from what came over the wire **before anything is
 written**, so a certificate that does not match leaves nothing behind on the
-host — and nothing is registered either. The whole chain the server sent is
-installed, not only the leaf whose fingerprint was checked: an internal CA's
-intermediates are what make the leaf verifiable.
+host — and nothing is registered either.
+
+A pin also narrows *what* is installed: only the certificate you named
+becomes a trust anchor. That is the difference between a pin that means
+something and one that does not. A leaf certificate is public — it is sent in
+every handshake — so anything in the middle could present GitLab's real leaf
+next to a certificate of its own, pass a leaf-only pin, and have its own
+certificate installed as an anchor it can sign anything with. Nothing
+unpinned is installed, so that does not work.
+
+Which certificate to pin follows from how GitLab's was issued:
+
+| GitLab's certificate | Pin | Why |
+| --- | --- | --- |
+| Self-signed (what the [`gitlab`](../gitlab) role generates) | that certificate | It is its own anchor |
+| Issued by your own CA | **the CA**, not the leaf | The server sends its intermediates in every handshake, so the CA alone verifies the leaf — and a leaf installed on its own is not an anchor OpenSSL-based clients will build a chain from |
+
+The role does not leave you to work that out from a TLS error: right after
+installing, it verifies GitLab's endpoint against exactly what it installed,
+and says to pin the CA instead if that is the problem.
+
+Without a pin the whole presented chain is installed, which is the strongest
+argument for setting one.
 
 Or copy the certificate out of band and skip the fetch entirely:
 
