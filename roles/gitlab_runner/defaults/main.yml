@@ -29,15 +29,43 @@ gitlab_runner_docker_engine_install: true
 # default: pointing a runner at the wrong GitLab is not something to guess at.
 gitlab_runner_url: ""
 
-# A GitLab with a certificate no public CA signed — a self-signed one, or your
-# own internal CA — has to be trusted by the runner explicitly. Supply the
-# certificate either as a file on the controller or as content, and the role
-# installs it where the runner looks for it:
-# /etc/gitlab-runner/certs/<host>.crt. The runner reads that file on every
-# call to GitLab, and hands it to the job's git through CI_SERVER_TLS_CA_FILE,
-# so clones inside jobs work too. PEM only; concatenate a chain into one file.
+# A GitLab with a certificate no public CA signed — a self-signed one, or
+# your own internal CA — has to be trusted by the runner explicitly. The role
+# installs whatever you give it at
+# /etc/gitlab-runner/certs/<host>.crt, which the runner reads on every call to
+# GitLab and hands to the job's git through CI_SERVER_TLS_CA_FILE, so clones
+# inside jobs work too. PEM only; concatenate a chain into one file.
+#
+# Three ways, in the order the role tries them: a file on the controller,
+# inline content, or fetched from GitLab itself (below).
 gitlab_runner_ca_certificate_src: ""
 gitlab_runner_ca_certificate_content: ""
+
+# Let the role fetch the certificate from GitLab with openssl, so there is no
+# file to copy around by hand.
+#
+# It only does so when the host's own trust store cannot already verify that
+# GitLab: an instance with a publicly signed certificate needs nothing
+# installed, and pinning one file for it would break the day the chain
+# changes. The fetch is for the case where verification fails.
+#
+# Understand what it is before relying on it. Asking a server for the
+# certificate you will then trust it by is trust-on-first-use: whoever
+# answers that first connection becomes permanently trusted, and the access
+# token that creates the runner travels over it. On a network where that
+# matters, either copy the certificate out of band (the two variables above)
+# or pin the fingerprint below, which turns the fetch into a verification
+# rather than an act of faith.
+gitlab_runner_ca_certificate_fetch: true
+
+# SHA-256 fingerprint the fetched certificate has to match, as openssl prints
+# it ("AA:BB:CC:..." — case and colons are ignored). Read it off the GitLab
+# host once:
+#
+#   sudo openssl x509 -in /etc/gitlab/ssl/<host>.crt -noout -fingerprint -sha256
+#
+# Empty accepts whatever the server presents.
+gitlab_runner_ca_certificate_fingerprint: ""
 
 # Set this instead when you manage the CA file on the host yourself: it is
 # written into config.toml as tls-ca-file and overrides the convention above.
@@ -304,6 +332,12 @@ gitlab_runner_validate_check_boot: true
 gitlab_runner_validate_check_registration: true
 
 gitlab_runner_validate_check_docker: true
+
+# Verify that the certificate in place actually validates GitLab's endpoint,
+# rather than assuming the file that was installed is the right one. This is
+# what catches a fetch that picked up a captive portal's certificate, or an
+# out-of-band copy of the wrong host's.
+gitlab_runner_validate_check_certificate: true
 
 # Run a throwaway container with the configured default image, which is the
 # only check that proves a job could actually start here. Pulls that image if

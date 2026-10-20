@@ -48,7 +48,7 @@
     headers:
       PRIVATE-TOKEN: "{{ gitlab_runner_api_token }}"
     validate_certs: "{{ gitlab_runner_api_validate_certs | bool }}"
-    ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_supplied | bool else omit }}"
+    ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_in_place | bool else omit }}"
     timeout: 30
   register: gitlab_runner_scope_lookup
   # The request carries the access token in a header.
@@ -91,7 +91,7 @@
     validate_certs: "{{ gitlab_runner_api_validate_certs | bool }}"
     # Verified against the same certificate the runner itself will use, so a
     # self-signed GitLab needs no exception here.
-    ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_supplied | bool else omit }}"
+    ca_path: "{{ gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_in_place | bool else omit }}"
     timeout: 30
   register: gitlab_runner_api_response
   # The answer contains the token.

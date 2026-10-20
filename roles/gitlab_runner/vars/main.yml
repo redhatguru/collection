@@ -58,6 +58,8 @@ gitlab_runner_os_packages:
   - ca-certificates
   - curl
   - gnupg
+  # Fetches and inspects GitLab's certificate in tasks/certificate.yml.
+  - openssl
   - python3-debian
 
 # --------------------------------------------------------------------------
@@ -91,12 +93,25 @@ gitlab_runner_ca_certificate_supplied: >-
   {{ (gitlab_runner_ca_certificate_src | length > 0)
      or (gitlab_runner_ca_certificate_content | length > 0) }}
 
+# Whether there is a certificate file for the runner to use at all. Set from
+# what tasks/certificate.yml actually installed once it has run — a fetch
+# finds out only at run time whether anything was needed — and falls back to
+# what was supplied for a run that skipped those tasks.
+gitlab_runner_ca_certificate_in_place: >-
+  {{ gitlab_runner_ca_certificate_present
+     | default(gitlab_runner_ca_certificate_supplied | bool) | bool }}
+
+# Normalised for comparison: openssl prints a fingerprint with colons and in
+# upper case, and people paste it back in every other shape.
+gitlab_runner_ca_certificate_fingerprint_wanted: >-
+  {{ gitlab_runner_ca_certificate_fingerprint | replace(':', '') | upper | trim }}
+
 # The CA file config.toml names: the explicit one when given, the installed
 # one when this role installed it, and nothing otherwise — where GitLab's
 # certificate is signed by a CA the host already trusts.
 gitlab_runner_tls_ca_file_effective: >-
   {{ gitlab_runner_tls_ca_file if gitlab_runner_tls_ca_file | length > 0
-     else (gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_supplied | bool else '') }}
+     else (gitlab_runner_ca_certificate_file if gitlab_runner_ca_certificate_in_place | bool else '') }}
 
 # --------------------------------------------------------------------------
 # The API call that creates the runner
@@ -144,3 +159,10 @@ gitlab_runner_scope_description: >-
   {{ gitlab_runner_scope
      ~ (' ' ~ gitlab_runner_group if gitlab_runner_scope == 'group'
         else (' ' ~ gitlab_runner_project if gitlab_runner_scope == 'project' else '')) }}
+
+# Every certificate openssl s_client -showcerts printed, in order. [\s\S] is
+# the pattern for "any character including newlines": Jinja's regex filters
+# have no DOTALL flag, so '.' alone would stop at the first line break.
+gitlab_runner_certificate_pem_blocks: >-
+  {{ gitlab_runner_certificate_fetch.stdout | default('')
+     | regex_findall('-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----') }}

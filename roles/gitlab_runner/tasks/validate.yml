@@ -104,6 +104,48 @@
     - gitlab_runner_validate_run_container | bool
     - gitlab_runner_executor == 'docker'
 
+# A certificate being installed says nothing about it being the right one.
+# This verifies GitLab's endpoint against exactly the file the runner will
+# use, which is what catches a fetch that picked up a captive portal's
+# certificate, or an out-of-band copy of another host's.
+- name: "ALL | Check that the certificate in place validates GitLab"
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - s_client
+      - -connect
+      - "{{ gitlab_runner_url_host }}:{{ gitlab_runner_url_port | trim }}"
+      - -servername
+      - "{{ gitlab_runner_url_host }}"
+      - -CAfile
+      - "{{ gitlab_runner_tls_ca_file_effective | trim }}"
+      - -verify_return_error
+      - -brief
+    stdin: ""
+  become: true
+  register: gitlab_runner_validate_certificate
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_runner_validate_check_certificate | bool
+    - gitlab_runner_tls_ca_file_effective | trim | length > 0
+
+- name: "ALL | Ensure the certificate the runner uses verifies GitLab"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_validate_certificate.rc == 0
+    fail_msg: >-
+      {{ gitlab_runner_tls_ca_file_effective | trim }} does not verify
+      {{ gitlab_runner_url_host }}:{{ gitlab_runner_url_port | trim }}:
+      {{ (gitlab_runner_validate_certificate.stderr_lines | default([]))[-3:] | join(' / ') }}
+      The runner would be refused by GitLab on every call. If the certificate
+      was fetched, something other than GitLab may have answered; if it was
+      copied in, it is the wrong host's or an expired one.
+    quiet: true
+  when:
+    - gitlab_runner_validate_check_certificate | bool
+    - gitlab_runner_tls_ca_file_effective | trim | length > 0
+
 # Everything above says this host can run a job now. This says it still could
 # after a reboot — a unit that is running but not enabled looks identical
 # until the host restarts.

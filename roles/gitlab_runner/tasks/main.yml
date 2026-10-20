@@ -36,7 +36,7 @@
 - name: "ALL | Ensure the runner trusts GitLab's certificate"
   ansible.builtin.include_tasks: certificate.yml
   tags: certificate
-  when: gitlab_runner_ca_certificate_supplied | bool
+  when: gitlab_runner_ca_certificate_supplied | bool or gitlab_runner_ca_certificate_fetch | bool
 
 - name: "ALL | Resolve the authentication token this runner registers with"
   ansible.builtin.include_tasks: token.yml

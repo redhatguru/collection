@@ -94,6 +94,50 @@
           - gitlab_runner_test_ca_file.stat.size > 0
         fail_msg: "No certificate at /etc/gitlab-runner/certs/gitlab.molecule.local.crt"
 
+    # The runner fetched this itself, so this is where the test checks it
+    # fetched the right thing rather than whatever answered the connection.
+    - name: Read the fingerprint of the certificate the runner installed
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - /etc/gitlab-runner/certs/gitlab.molecule.local.crt
+          - -noout
+          - -fingerprint
+          - -sha256
+      become: true
+      register: gitlab_runner_test_installed_fingerprint
+      changed_when: false
+
+    - name: Check that the certificate it fetched verifies GitLab's endpoint
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - s_client
+          - -connect
+          - "{{ gitlab_runner_test_hostname }}:443"
+          - -servername
+          - "{{ gitlab_runner_test_hostname }}"
+          - -CAfile
+          - /etc/gitlab-runner/certs/gitlab.molecule.local.crt
+          - -verify_return_error
+          - -brief
+        stdin: ""
+      become: true
+      register: gitlab_runner_test_openssl_verify
+      changed_when: false
+
+    - name: Assert the fetched certificate is the one that verifies GitLab
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_test_openssl_verify.rc == 0
+        fail_msg: >-
+          The certificate the runner fetched does not verify
+          {{ gitlab_runner_test_hostname }}
+          ({{ gitlab_runner_test_installed_fingerprint.stdout | default('no fingerprint') }}):
+          {{ gitlab_runner_test_openssl_verify.stderr | default('') | trim }}
+
     - name: Check that the runner can reach GitLab's API through that certificate
       ansible.builtin.uri:
         url: "https://{{ gitlab_runner_test_hostname }}/api/v4/version"

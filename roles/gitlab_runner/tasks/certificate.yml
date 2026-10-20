@@ -1,13 +1,15 @@
 ---
-# Installs the certificate the runner should trust, where the runner looks for
-# it: /etc/gitlab-runner/certs/<the URL's host>.crt. That file is read on
-# every call to GitLab, so a renewed certificate needs no re-registration, and
-# the runner also hands it to the job's git through CI_SERVER_TLS_CA_FILE —
-# which is what makes `git clone` inside a job work against a GitLab whose
-# certificate no public CA signed.
+# Puts the certificate the runner should trust where the runner looks for it:
+# /etc/gitlab-runner/certs/<the URL's host>.crt. That file is read on every
+# call to GitLab — so a renewed certificate needs no re-registration — and the
+# runner hands it to each job through CI_SERVER_TLS_CA_FILE, which is what
+# makes `git clone` inside a job work.
 #
-# Only reached when a certificate was supplied. A GitLab with a publicly
-# trusted certificate needs none of this.
+# Three sources, in this order: a file on the controller, inline content, or
+# fetched from GitLab with openssl. The fetch happens only when the host's own
+# trust store cannot already verify that GitLab, because an instance with a
+# publicly signed certificate needs nothing installed and pinning one file for
+# it would break the day its chain changes.
 
 - name: "ALL | Ensure the runner's certificate directory exists"
   ansible.builtin.file:
@@ -15,8 +17,8 @@
     state: directory
     owner: root
     group: root
-    # Readable rather than private: a certificate is public, and the runner
-    # reads it as root while jobs may need the path.
+    # Readable rather than private: a certificate is public, and jobs may
+    # need the path.
     mode: "0755"
   become: true
 
@@ -43,3 +45,150 @@
   when:
     - gitlab_runner_ca_certificate_src | length == 0
     - gitlab_runner_ca_certificate_content | length > 0
+
+# --------------------------------------------------------------------------
+# Fetching it from GitLab
+# --------------------------------------------------------------------------
+
+- name: "ALL | Check whether this host can already verify GitLab's certificate"
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - s_client
+      - -connect
+      - "{{ gitlab_runner_url_host }}:{{ gitlab_runner_url_port | trim }}"
+      - -servername
+      - "{{ gitlab_runner_url_host }}"
+      - -verify_return_error
+      - -brief
+    # s_client reads stdin and would otherwise wait for input forever.
+    stdin: ""
+  register: gitlab_runner_certificate_trusted
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_runner_ca_certificate_fetch | bool
+    - not gitlab_runner_ca_certificate_supplied | bool
+
+- name: "ALL | Report that GitLab's certificate needs no help"
+  ansible.builtin.debug:
+    msg: >-
+      {{ gitlab_runner_url_host }} presents a certificate this host already
+      verifies, so nothing is installed: the runner uses the system trust
+      store, and a renewed certificate or a changed chain keeps working
+      without this role being re-run.
+  when:
+    - gitlab_runner_ca_certificate_fetch | bool
+    - not gitlab_runner_ca_certificate_supplied | bool
+    - gitlab_runner_certificate_trusted.rc | default(1) == 0
+
+# -showcerts prints every certificate the server sends, so an internal CA's
+# intermediates come along rather than only the leaf. The PEM blocks are
+# pulled out of the output here instead of with a shell pipeline: /bin/sh is
+# dash on Ubuntu, and a pipe without pipefail would hide a failing openssl
+# behind the exit code of whatever came after it.
+- name: "ALL | Fetch the certificate chain GitLab presents"
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - s_client
+      - -connect
+      - "{{ gitlab_runner_url_host }}:{{ gitlab_runner_url_port | trim }}"
+      - -servername
+      - "{{ gitlab_runner_url_host }}"
+      - -showcerts
+    stdin: ""
+  register: gitlab_runner_certificate_fetch
+  changed_when: false
+  when:
+    - gitlab_runner_ca_certificate_fetch | bool
+    - not gitlab_runner_ca_certificate_supplied | bool
+    - gitlab_runner_certificate_trusted.rc | default(1) != 0
+
+- name: "ALL | Ensure GitLab actually presented a certificate"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_certificate_chain | length > 0
+    fail_msg: >-
+      Nothing certificate-shaped came back from
+      {{ gitlab_runner_url_host }}:{{ gitlab_runner_url_port | trim }}.
+      openssl said:
+      {{ (gitlab_runner_certificate_fetch.stderr_lines | default([]))[-3:] | join(' / ') }}
+      Check that this is GitLab's https port and not its SSH or redirect port.
+    quiet: true
+  vars:
+    gitlab_runner_certificate_chain: "{{ gitlab_runner_certificate_pem_blocks }}"
+  when:
+    - gitlab_runner_ca_certificate_fetch | bool
+    - not gitlab_runner_ca_certificate_supplied | bool
+    - gitlab_runner_certificate_trusted.rc | default(1) != 0
+
+- name: "ALL | Ensure the fetched certificate is installed"
+  ansible.builtin.copy:
+    content: "{{ gitlab_runner_certificate_pem_blocks | join('\n') }}\n"
+    dest: "{{ gitlab_runner_ca_certificate_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: "ALL | Restart the runner so it picks up its configuration"
+  when:
+    - gitlab_runner_ca_certificate_fetch | bool
+    - not gitlab_runner_ca_certificate_supplied | bool
+    - gitlab_runner_certificate_trusted.rc | default(1) != 0
+
+# --------------------------------------------------------------------------
+# What ended up on the host
+# --------------------------------------------------------------------------
+
+- name: "ALL | Check which certificate the runner will use"
+  ansible.builtin.stat:
+    path: "{{ gitlab_runner_ca_certificate_file }}"
+  become: true
+  register: gitlab_runner_certificate_state
+
+- name: "ALL | Record whether the runner has a certificate of its own to use"
+  ansible.builtin.set_fact:
+    gitlab_runner_ca_certificate_present: "{{ gitlab_runner_certificate_state.stat.exists }}"
+
+# The fingerprint is what turns the fetch from an act of faith into a
+# verification: it is read off the certificate that is now on the host and
+# compared with the one this deployment expects.
+- name: "ALL | Read the fingerprint of the certificate on this host"
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ gitlab_runner_ca_certificate_file }}"
+      - -noout
+      - -fingerprint
+      - -sha256
+  become: true
+  register: gitlab_runner_certificate_fingerprint_found
+  changed_when: false
+  when:
+    - gitlab_runner_ca_certificate_present | bool
+    - gitlab_runner_ca_certificate_fingerprint | length > 0
+
+- name: "ALL | Ensure the certificate is the one this deployment expects"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_certificate_fingerprint_seen == gitlab_runner_ca_certificate_fingerprint_wanted | trim
+    fail_msg: >-
+      The certificate at {{ gitlab_runner_ca_certificate_file }} has
+      fingerprint {{ gitlab_runner_certificate_fingerprint_seen }}, and
+      gitlab_runner_ca_certificate_fingerprint expects
+      {{ gitlab_runner_ca_certificate_fingerprint_wanted | trim }}. Either
+      GitLab's certificate was replaced — read the new fingerprint off the
+      host and update the variable — or something other than GitLab answered
+      the connection this certificate came from. Nothing is registered until
+      this matches.
+    quiet: true
+  vars:
+    gitlab_runner_certificate_fingerprint_seen: >-
+      {{ gitlab_runner_certificate_fingerprint_found.stdout | default('')
+         | regex_replace('^.*=', '') | replace(':', '') | upper | trim }}
+  when:
+    - gitlab_runner_ca_certificate_present | bool
+    - gitlab_runner_ca_certificate_fingerprint | length > 0

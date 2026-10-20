@@ -38,15 +38,29 @@
         gitlab_validate_retries: 90
         gitlab_validate_delay: 10
 
-    - name: Read the certificate GitLab generated for itself
-      ansible.builtin.slurp:
-        src: "/etc/gitlab/ssl/{{ gitlab_runner_test_hostname }}.crt"
+    # Only the fingerprint is handed over, not the certificate: the runner
+    # fetches that itself, which is the path an operator takes and so the one
+    # worth testing. Pinning the fingerprint here is what turns that fetch
+    # from trust-on-first-use into a verification, and proves the runner
+    # picked up exactly the certificate this GitLab generated.
+    - name: Read the fingerprint of the certificate GitLab generated for itself
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "/etc/gitlab/ssl/{{ gitlab_runner_test_hostname }}.crt"
+          - -noout
+          - -fingerprint
+          - -sha256
       become: true
-      register: gitlab_runner_test_certificate
+      register: gitlab_runner_test_fingerprint
+      changed_when: false
 
-    - name: Publish that certificate for the runner play
+    - name: Publish that fingerprint for the runner play
       ansible.builtin.set_fact:
-        gitlab_runner_test_ca_certificate: "{{ gitlab_runner_test_certificate.content | b64decode }}"
+        gitlab_runner_test_ca_fingerprint: >-
+          {{ gitlab_runner_test_fingerprint.stdout | regex_replace('^.*=', '') | trim }}
 
     # What an operator does in the UI — Settings > Access Tokens with the
     # create_runner scope — done from the Rails console, because a Molecule
@@ -83,9 +97,10 @@
       ansible.builtin.include_role:
         name: gitlab_runner
       vars:
-        # Both taken off the GitLab host in the play above. The certificate is
-        # what lets the runner speak to GitLab at all; the token is used once,
-        # to create the runner, and never written to this host.
-        gitlab_runner_ca_certificate_content: "{{ hostvars['gitlab-server']['gitlab_runner_test_ca_certificate'] }}"
+        # The runner fetches GitLab's certificate itself and checks it against
+        # this fingerprint, so nothing has to be copied around. The token is
+        # used once, to create the runner, and never written to this host.
+        gitlab_runner_ca_certificate_fetch: true
+        gitlab_runner_ca_certificate_fingerprint: "{{ hostvars['gitlab-server']['gitlab_runner_test_ca_fingerprint'] }}"
         gitlab_runner_api_token: "{{ hostvars['gitlab-server']['gitlab_runner_test_api_token'] }}"
         gitlab_runner_scope: "instance"

@@ -18,8 +18,9 @@ What it delivers, in one run, with no manual step afterwards:
   runner's whole configuration is one reviewable file
 - The **runner created through GitLab's API**, which is where its
   authentication token comes from — see [section 4](#4-the-token)
-- The **certificate of a GitLab no public CA signed for** installed where the
-  runner looks for it, so both the runner and the git inside its jobs trust it
+- The **certificate of a GitLab no public CA signed for** fetched with
+  `openssl` and installed where the runner looks for it, so both the runner
+  and the git inside its jobs trust it with no file to copy by hand
 - **Verification**: GitLab itself confirms the runner is registered, a
   throwaway container proves a job could actually start, and both systemd
   units are checked to be enabled so the host comes back as a working runner
@@ -161,6 +162,9 @@ and are deliberately not overridable.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `gitlab_runner_url` | `""` | Base URL of the GitLab instance. Required |
+| `gitlab_runner_ca_certificate_fetch` | `true` | Fetch GitLab's certificate with openssl when the host's trust store cannot verify it — see [section 7](#7-a-gitlab-with-a-self-signed-certificate) |
+| `gitlab_runner_ca_certificate_fingerprint` | `""` | SHA-256 the fetched certificate must match |
+| `gitlab_runner_ca_certificate_src` / `_content` | `""` | A certificate you supply instead of fetching |
 | `gitlab_runner_version` | `""` | Package release, e.g. `19.5.0-1`. Empty installs the newest |
 | `gitlab_runner_package_hold` | `true` | Hold the package in dpkg |
 | `gitlab_runner_scope` | `instance` | `instance`, `group` or `project` |
@@ -235,33 +239,72 @@ runner for each purpose rather than one for both).
 
 A runner against a GitLab whose certificate no public CA signed fails in the
 least obvious way: every call is refused, and the runner looks installed but
-registers nothing. Supply the certificate and the role puts it where the
-runner looks:
+registers nothing. The role handles it without a manual step:
 
 ```yaml
 gitlab_runner_url: "https://gitlab.devlab.local"
-
-# Either a PEM file on the controller…
-gitlab_runner_ca_certificate_src: "files/gitlab.devlab.local.crt"
-# …or its content, for instance read off the GitLab host itself.
-# gitlab_runner_ca_certificate_content: "{{ lookup('file', 'gitlab.crt') }}"
+# gitlab_runner_ca_certificate_fetch: true   # the default
 ```
 
-It lands at `/etc/gitlab-runner/certs/<the URL's host>.crt`, which is the path
-the runner reads **on every call** to GitLab — so a renewed certificate needs
-no re-registration — and it is named in `config.toml` as `tls-ca-file`. The
+The certificate is fetched with `openssl s_client -showcerts`, so an internal
+CA's intermediates come along rather than only the leaf, and installed at
+`/etc/gitlab-runner/certs/<the URL's host>.crt` — the path the runner reads
+**on every call**, so a renewed certificate needs no re-registration. The
 runner also hands it to each job through `CI_SERVER_TLS_CA_FILE`, which is
 what makes `git clone` inside a job work.
 
-The one API call the role makes is verified against the same certificate, so
-there is no need to turn certificate verification off anywhere. If you do
-turn it off (`gitlab_runner_api_validate_certs: false`), you are trusting
-whatever answers that address for the one call that hands over an access
-token — supply the certificate instead.
+It only fetches when it has to. First it asks whether this host's own trust
+store already verifies that GitLab; when it does, nothing is installed and
+the message says so — an instance with a publicly signed certificate needs no
+pinned file, and pinning one would break the day its chain changes.
+
+### What fetching actually means
+
+Asking a server for the certificate you will then trust it by is
+**trust-on-first-use**. Whoever answers that first connection becomes
+permanently trusted, and the access token that creates the runner travels
+over it. On a network where that matters, close the gap in one of two ways.
+
+Pin the fingerprint, which turns the fetch into a verification:
+
+```bash
+# On the GitLab host, once:
+sudo openssl x509 -in /etc/gitlab/ssl/gitlab.devlab.local.crt -noout -fingerprint -sha256
+```
+
+```yaml
+gitlab_runner_ca_certificate_fingerprint: "AA:BB:CC:…"   # case and colons ignored
+```
+
+Nothing is registered unless the certificate on the host matches it.
+
+Or copy the certificate out of band and skip the fetch entirely:
+
+```yaml
+gitlab_runner_ca_certificate_src: "files/gitlab.devlab.local.crt"
+# or
+# gitlab_runner_ca_certificate_content: "{{ lookup('file', 'gitlab.crt') }}"
+```
+
+Either of those takes precedence over fetching, and
+`gitlab_runner_ca_certificate_fetch: false` refuses it outright. A CA file you
+manage yourself elsewhere on the host goes in `gitlab_runner_tls_ca_file`.
+
+Whichever route, `gitlab_runner_validate_check_certificate` (default true)
+afterwards verifies GitLab's endpoint against exactly the file the runner
+will use — which is what catches a fetch that picked up a captive portal's
+certificate, or an out-of-band copy of the wrong host's.
+
+The one API call the role makes is verified against that same certificate, so
+there is no need to turn certificate verification off anywhere. If you do turn
+it off (`gitlab_runner_api_validate_certs: false`), you are trusting whatever
+answers that address for the one call that hands over an access token — pin
+the fingerprint instead.
 
 With a GitLab built by this collection's [`gitlab`](../gitlab) role and
 `gitlab_tls_certificate_source: self-signed`, the certificate is at
-`/etc/gitlab/ssl/<host>.crt` on the GitLab host.
+`/etc/gitlab/ssl/<host>.crt` on the GitLab host, which is where the
+fingerprint above comes from.
 
 8. Tags
 -------
@@ -292,9 +335,11 @@ is the whole point of this role and cannot be tested without a real GitLab —
 a mocked API would prove only that the role can talk to a mock.
 
 The GitLab is deliberately built with https and a self-signed certificate,
-because that is where a runner fails in the least obvious way. The scenario
-takes the certificate and an access token off the GitLab host itself, so
-nothing is pre-seeded:
+because that is where a runner fails in the least obvious way. The runner
+**fetches that certificate itself**, and the scenario pins the fingerprint it
+reads off the GitLab host — so the test proves the runner picked up exactly
+the right certificate rather than whatever answered. The access token is
+minted on the GitLab host too, so nothing is pre-seeded:
 
 | Step | What it does |
 | --- | --- |
