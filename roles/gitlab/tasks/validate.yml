@@ -184,6 +184,76 @@
           not carry HTTP, this check cannot work from here: set
           gitlab_validate_check_reachable to false.
 
+# --------------------------------------------------------------------------
+# Would this instance survive a reboot?
+# --------------------------------------------------------------------------
+#
+# Everything above says the instance works now. These say it would still work
+# after the host restarts, which is a different question: a service that is
+# running but not enabled, a firewall whose rules were never persisted, and
+# swap that only exists because someone ran swapon all look healthy until the
+# next reboot.
+
+- name: "ALL | Check which units would start GitLab and its firewall at boot"
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, "{{ item }}"]
+  register: gitlab_validate_boot_units
+  changed_when: false
+  failed_when: false
+  loop: "{{ [gitlab_runsvdir_service_name] + (['ufw'] if gitlab_firewall_enabled | bool else []) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: gitlab_validate_check_boot | bool
+
+- name: "ALL | Ensure GitLab and its firewall are started at boot"
+  ansible.builtin.assert:
+    that:
+      # "enabled" and "enabled-runtime" both start it; "static" and "alias"
+      # are units something else pulls in, which is equally fine.
+      - item.stdout | trim in ['enabled', 'enabled-runtime', 'static', 'alias', 'indirect']
+    fail_msg: >-
+      systemd reports '{{ item.item }}' as
+      '{{ item.stdout | default('missing') | trim }}', so it would not start
+      after a reboot — GitLab
+      {{ 'would not come back at all' if item.item == gitlab_runsvdir_service_name
+         else 'would come back with no firewall in front of it' }}.
+      Enable it with `sudo systemctl enable --now {{ item.item }}`, or let this
+      role do it: gitlab_service_enabled covers
+      {{ gitlab_runsvdir_service_name }}, and the firewall's unit is enabled by
+      the firewall tasks.
+    quiet: true
+  loop: "{{ gitlab_validate_boot_units.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: gitlab_validate_check_boot | bool
+
+- name: "ALL | Check whether anything mounts this host's swap at boot"
+  ansible.builtin.command:
+    argv: [findmnt, --fstab, --types, swap, --noheadings]
+  register: gitlab_validate_swap_fstab
+  changed_when: false
+  failed_when: false
+  when:
+    - gitlab_validate_check_swap_persistent | bool
+    - ansible_facts['swaptotal_mb'] | int > 0
+
+- name: "ALL | Ensure the swap GitLab needs is still there after a reboot"
+  ansible.builtin.assert:
+    that:
+      - gitlab_validate_swap_fstab.stdout | default('') | trim | length > 0
+    fail_msg: >-
+      This host has {{ ansible_facts['swaptotal_mb'] }} MB of swap active, but
+      /etc/fstab mounts none — so a reboot loses it, and this role's own
+      preflight checks then refuse to run (GitLab's minimum includes swap,
+      because it is what turns a memory spike into slowness instead of a
+      half-migrated database). Add the swap device or file to /etc/fstab. On a
+      host where swap comes from zram or systemd-swap instead, set
+      gitlab_validate_check_swap_persistent to false.
+    quiet: true
+  when:
+    - gitlab_validate_check_swap_persistent | bool
+    - ansible_facts['swaptotal_mb'] | int > 0
+
 - name: "ALL | Ensure the GitLab configuration and secrets are readable by root only"
   ansible.builtin.stat:
     path: "{{ item }}"

@@ -53,6 +53,11 @@
   ansible.builtin.meta: flush_handlers
   tags: always
 
+- name: "ALL | Ensure the runner comes back by itself after a reboot"
+  ansible.builtin.include_tasks: service.yml
+  tags: service
+  when: gitlab_runner_service_enabled | bool
+
 - name: "ALL | Verify the runner is registered and able to run jobs"
   ansible.builtin.include_tasks: validate.yml
   tags: validate

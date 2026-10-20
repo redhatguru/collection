@@ -1,0 +1,38 @@
+---
+# Reboots the host and proves GitLab comes back by itself.
+#
+# Opt-in twice over: the task in main.yml is tagged never, so this needs
+# --tags reboot-test, and nothing else in the role reaches it. Rebooting a
+# running GitLab is not a decision a configuration run should take.
+#
+# This is the only honest proof of "survives a reboot": unit states say what
+# systemd intends to do, and this says what actually happened. Worth running
+# once on a new instance, and after anything that touches boot order — a new
+# kernel, a storage change, a swap change.
+
+- name: "ALL | Report that this host is about to be rebooted"
+  ansible.builtin.debug:
+    msg: >-
+      Rebooting {{ inventory_hostname }} to verify GitLab returns without
+      help. Every session on it ends, and the instance is unavailable until
+      runit has brought its services back — a few minutes, longer on a host
+      at the edge of its memory.
+
+- name: "ALL | Reboot the host"
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ gitlab_reboot_test_timeout | int }}"
+  become: true
+
+# The full set, not a subset: after a reboot the interesting failures are the
+# ones that look like a healthy host — nginx up with no certificate because a
+# mount came back late, Puma up before PostgreSQL, a firewall whose rules
+# were never persisted.
+- name: "ALL | Verify the instance that came back is the one that went down"
+  ansible.builtin.include_tasks: validate.yml
+
+- name: "ALL | Report the completed reboot test"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} rebooted and GitLab came back on its own:
+      services running, {{ gitlab_running_version | default('version unchecked') }}
+      serving, and the checks in tasks/validate.yml all passed.

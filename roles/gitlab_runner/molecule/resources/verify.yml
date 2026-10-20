@@ -8,6 +8,14 @@
   gather_facts: true
 
   tasks:
+    # The runner is checked after a reboot, because "installed" and "comes
+    # back on its own" are different claims and only one of them matters at
+    # three in the morning.
+    - name: Reboot the runner before checking anything
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+      become: true
+
     - name: Check that the runner service is running
       ansible.builtin.command:
         argv: [systemctl, is-active, gitlab-runner]

@@ -434,7 +434,18 @@
     # leaving a healthy instance unreachable. Switch it off where the
     # controller reaches this host through a bastion that carries no HTTP.
     gitlab_validate_check_reachable: true
-    gitlab_validate_reachable_address: "{{ ansible_host | default(inventory_hostname) }}"
+
+    # Read out of hostvars rather than as plain ansible_host: the task that
+    # uses this is delegated to the controller, and inside a delegated task
+    # ansible_host is the delegation target — "localhost" — not the host being
+    # configured.
+    gitlab_validate_reachable_address: >-
+      {{ hostvars[inventory_hostname]['ansible_host'] | default(inventory_hostname, true) }}
+
+    # Would this instance come back after a reboot? These check the unit
+    # states and the swap, rather than assuming either.
+    gitlab_validate_check_boot: true
+    gitlab_validate_check_swap_persistent: true
 
     # GitLab needs a few minutes after a reconfigure before Puma answers.
     gitlab_validate_retries: 60
@@ -442,6 +453,22 @@
 
     # Adds the full `gitlab-ctl status` output to the end-of-run report.
     gitlab_debug: false
+
+    # ----------------------------------------------------------------------
+    # Surviving a reboot
+    # ----------------------------------------------------------------------
+    #
+    # GitLab's services are supervised by runit, and runit by one systemd
+    # unit — so that unit decides whether the instance returns after a
+    # restart. The package enables it; this keeps it that way, and corrects a
+    # host where someone disabled it.
+    gitlab_service_enabled: true
+
+    # Bounds the opt-in reboot test, which is reachable only with
+    # `--tags reboot-test`: it reboots the host and runs the full validation
+    # on what comes back. Unit states say what systemd intends to do; that
+    # says what actually happens.
+    gitlab_reboot_test_timeout: 900
 
     # ----------------------------------------------------------------------
     # Upgrades — not part of this play

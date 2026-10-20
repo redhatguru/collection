@@ -71,6 +71,11 @@ gitlab_secrets_file: "{{ gitlab_config_dir }}/gitlab-secrets.json"
 # predictable: package first, then backup-safe reconfigure, then validation.
 gitlab_skip_auto_reconfigure_file: "{{ gitlab_config_dir }}/skip-auto-reconfigure"
 
+# GitLab's services are supervised by runit, and runit itself by this one
+# systemd unit — so this is what decides whether GitLab returns after a
+# reboot. `gitlab-ctl` talks to runit, not to systemd.
+gitlab_runsvdir_service_name: "gitlab-runsvdir"
+
 gitlab_ctl_command: "/usr/bin/gitlab-ctl"
 gitlab_rake_command: "/usr/bin/gitlab-rake"
 gitlab_backup_command: "/usr/bin/gitlab-backup"

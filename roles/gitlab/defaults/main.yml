@@ -489,6 +489,16 @@ gitlab_validate_check_version: true
 gitlab_validate_check_http: true
 gitlab_validate_check_migrations: true
 
+# Check that everything this instance needs would come back after a reboot:
+# the systemd unit that supervises GitLab is enabled, the firewall's unit is
+# enabled, and swap is mounted by something at boot rather than only by hand.
+gitlab_validate_check_boot: true
+
+# Swap that is active but absent from /etc/fstab disappears on the next
+# reboot — and GitLab's own preflight checks then refuse to run. Turn this off
+# on a host where swap comes from zram or systemd-swap rather than fstab.
+gitlab_validate_check_swap_persistent: true
+
 # Dial GitLab's web port from the controller rather than over the host's own
 # loopback interface. This is the only check that notices a firewall, a cloud
 # security group or a routing rule between clients and the instance — the
@@ -503,7 +513,14 @@ gitlab_validate_check_reachable: true
 # The address the controller dials for that check. The address Ansible already
 # connects over is right everywhere except behind port forwarding (Vagrant,
 # for instance), where 127.0.0.1 would test the controller's own port.
-gitlab_validate_reachable_address: "{{ ansible_host | default(inventory_hostname) }}"
+#
+# Read out of hostvars rather than as plain ansible_host: the task that uses
+# this is delegated to the controller, and inside a delegated task
+# ansible_host is the *delegation target* — "localhost" — not the host being
+# configured. A plain ansible_host here dialled the controller's own port 443
+# and reported the remote host as unreachable.
+gitlab_validate_reachable_address: >-
+  {{ hostvars[inventory_hostname]['ansible_host'] | default(inventory_hostname, true) }}
 
 # `gitlab-rake gitlab:check`, GitLab's own full self-test. Thorough, and slow
 # enough (minutes) that it is opt-in.
@@ -518,6 +535,22 @@ gitlab_validate_http_validate_certs: false
 # longer after an upgrade that runs migrations.
 gitlab_validate_retries: 60
 gitlab_validate_delay: 10
+
+# --------------------------------------------------------------------------
+# Surviving a reboot
+# --------------------------------------------------------------------------
+
+# Keep the systemd unit that supervises GitLab enabled, so the instance comes
+# back on its own after a reboot. The package enables it at install time;
+# this makes the guarantee the role's rather than the package's, and corrects
+# a host where someone disabled it.
+gitlab_service_enabled: true
+
+# Actually reboot the host and prove GitLab comes back, instead of inferring
+# it from unit states. Opt-in twice over — it is also tagged never, so it
+# takes `--tags reboot-test` as well — because rebooting a running GitLab is
+# not something a configuration run should decide to do.
+gitlab_reboot_test_timeout: 900
 
 # --------------------------------------------------------------------------
 # Reporting

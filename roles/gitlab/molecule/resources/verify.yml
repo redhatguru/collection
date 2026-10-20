@@ -28,6 +28,16 @@
       - "prometheus_monitoring['enable'] = false"
 
   tasks:
+    # Everything below is checked on an instance that has just come back from
+    # a reboot, which is the only honest way to test that it does. The
+    # interesting failures after a reboot are the ones that look healthy:
+    # nginx up with no certificate because a mount came back late, Puma up
+    # before PostgreSQL, a firewall whose rules were never persisted.
+    - name: Reboot the instance before checking anything
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+      become: true
+
     - name: Work out which release the test upgraded to
       ansible.builtin.include_tasks: tasks/discover-releases.yml
 

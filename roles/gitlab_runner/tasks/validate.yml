@@ -104,6 +104,39 @@
     - gitlab_runner_validate_run_container | bool
     - gitlab_runner_executor == 'docker'
 
+# Everything above says this host can run a job now. This says it still could
+# after a reboot — a unit that is running but not enabled looks identical
+# until the host restarts.
+- name: "ALL | Check which units would start the runner and Docker at boot"
+  ansible.builtin.command:
+    argv: [systemctl, is-enabled, "{{ item }}"]
+  register: gitlab_runner_validate_boot_units
+  changed_when: false
+  failed_when: false
+  loop: >-
+    {{ [gitlab_runner_service_name]
+       + (['docker'] if gitlab_runner_executor == 'docker' else []) }}
+  loop_control:
+    label: "{{ item }}"
+  when: gitlab_runner_validate_check_boot | bool
+
+- name: "ALL | Ensure the runner and Docker are started at boot"
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim in ['enabled', 'enabled-runtime', 'static', 'alias', 'indirect']
+    fail_msg: >-
+      systemd reports '{{ item.item }}' as
+      '{{ item.stdout | default('missing') | trim }}', so it would not start
+      after a reboot and this host would come back with the software installed
+      but no runner taking jobs. Enable it with
+      `sudo systemctl enable --now {{ item.item }}`, or let the role do it:
+      gitlab_runner_service_enabled covers both units.
+    quiet: true
+  loop: "{{ gitlab_runner_validate_boot_units.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: gitlab_runner_validate_check_boot | bool
+
 - name: "ALL | Ensure the runner's credentials are readable by root only"
   ansible.builtin.stat:
     path: "{{ gitlab_runner_config_file }}"

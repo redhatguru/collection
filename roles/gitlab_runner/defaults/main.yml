@@ -293,6 +293,11 @@ gitlab_runner_preflight_check_url_reachable: true
 
 gitlab_runner_validate_check_service: true
 
+# Check that this host would take jobs again after a reboot: the runner's
+# systemd unit and Docker's are both enabled, not merely running. A unit that
+# is running but not enabled looks healthy until the host restarts.
+gitlab_runner_validate_check_boot: true
+
 # `gitlab-runner verify`, which asks GitLab whether this runner's token is
 # still good. The check that catches a revoked or expired token, and the
 # reason this role does not need to guess.
@@ -304,5 +309,10 @@ gitlab_runner_validate_check_docker: true
 # only check that proves a job could actually start here. Pulls that image if
 # it is not present yet.
 gitlab_runner_validate_run_container: true
+
+# Keep the runner's and Docker's systemd units enabled, so this host comes
+# back as a working runner after a reboot rather than as a host with the
+# software installed.
+gitlab_runner_service_enabled: true
 
 gitlab_runner_debug: false

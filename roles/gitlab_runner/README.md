@@ -20,8 +20,10 @@ What it delivers, in one run, with no manual step afterwards:
   authentication token comes from — see [section 4](#4-the-token)
 - The **certificate of a GitLab no public CA signed for** installed where the
   runner looks for it, so both the runner and the git inside its jobs trust it
-- **Verification**: GitLab itself confirms the runner is registered, and a
-  throwaway container proves a job could actually start
+- **Verification**: GitLab itself confirms the runner is registered, a
+  throwaway container proves a job could actually start, and both systemd
+  units are checked to be enabled so the host comes back as a working runner
+  after a reboot
 
 One runner per host. A host with several `[[runners]]` sections is a different
 shape of deployment and deliberately out of scope — run the role against more
@@ -265,7 +267,13 @@ With a GitLab built by this collection's [`gitlab`](../gitlab) role and
 -------
 
 `preflight`, `os`, `repository`, `docker`, `install`, `certificate`, `token`,
-`config`, `validate`, `report`.
+`config`, `service`, `validate`, `report`.
+
+`gitlab_runner_service_enabled` (default `true`) keeps the runner's and
+Docker's systemd units enabled rather than merely running, and
+`gitlab_runner_validate_check_boot` checks that rather than assuming it — a
+unit that is running but not enabled looks identical until the host
+restarts.
 
 ```bash
 # Re-render the configuration and restart the runner, nothing else.

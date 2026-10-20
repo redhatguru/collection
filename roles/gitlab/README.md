@@ -21,8 +21,9 @@ What it delivers, in one run, with no manual step afterwards:
 - **A host firewall that stays enabled**, opening exactly the ports this
   instance serves — derived from the external URL and the enabled components
 - **Validation after every run**: services up, the running release, the web
-  interface answering, no pending migrations, credentials root-only, and the
-  instance actually reachable from outside the host
+  interface answering, no pending migrations, credentials root-only, the
+  instance actually reachable from outside the host, and everything it needs
+  enabled to come back after a reboot
 
 One GitLab per host. A reference architecture that splits Rails, Gitaly,
 PostgreSQL and Redis across machines is a different shape of deployment and
@@ -278,10 +279,16 @@ block GitLab documents — keep the bind password in Vault), and
 
 `gitlab_validate_enabled` (default `true`) and the individual checks:
 `gitlab_validate_check_services`, `_check_version`, `_check_http`,
-`_check_migrations`, plus `gitlab_validate_run_gitlab_check` (GitLab's own
-full self-test — thorough, slow, opt-in),
-`gitlab_validate_http_validate_certs`, `gitlab_validate_retries` and
+`_check_migrations`, `_check_reachable` (the one that leaves the host),
+`_check_boot` and `_check_swap_persistent` (see
+[Surviving a reboot](#surviving-a-reboot)), plus
+`gitlab_validate_run_gitlab_check` (GitLab's own full self-test — thorough,
+slow, opt-in), `gitlab_validate_http_validate_certs`,
+`gitlab_validate_reachable_address`, `gitlab_validate_retries` and
 `gitlab_validate_delay`.
+
+`gitlab_service_enabled` (default `true`) keeps `gitlab-runsvdir` enabled, and
+`gitlab_reboot_test_timeout` bounds the opt-in reboot test.
 
 5. Configuration: how `gitlab.rb` is built
 ------------------------------------------
@@ -587,6 +594,36 @@ instance rather than the tasks that built it:
 | `gitlab-rake db:abort_if_pending_migrations` | An interrupted reconfigure |
 | `gitlab.rb` and `gitlab-secrets.json` are `0600` root | Credentials readable by anyone with a shell |
 | The web port answers from the **controller** | A firewall rule, security group or route that leaves a healthy instance unreachable |
+| `gitlab-runsvdir` and `ufw` are **enabled**, not merely running | An instance that works now and does not come back after a reboot |
+| Active swap is mounted by `/etc/fstab` | Swap that only exists because someone ran `swapon`: a reboot loses it, and this role's own preflight then refuses to run |
+
+### Surviving a reboot
+
+GitLab's services are supervised by runit, and runit by one systemd unit,
+`gitlab-runsvdir` — so that unit is what decides whether the instance returns
+after a restart. `gitlab-ctl start|stop|restart` talks to runit and says
+nothing about boot.
+
+The package enables that unit at install time, so a fresh install already
+comes back on its own. The role keeps it enabled anyway
+(`gitlab_service_enabled`, default true), which makes the guarantee the
+role's rather than the package's and corrects a host where someone disabled
+it. `gitlab_validate_check_boot` then checks the unit states rather than
+assuming them, and `gitlab_validate_check_swap_persistent` catches swap that
+would not survive the reboot.
+
+Unit states say what systemd *intends* to do. To find out what actually
+happens:
+
+```bash
+ansible-playbook playbooks/gitlab.yml --tags reboot-test
+```
+
+That reboots the host and runs the full validation on what comes back — the
+only honest proof, and worth doing once on a new instance and after anything
+that touches boot order: a new kernel, a storage change, a swap change. It is
+tagged `never`, so it is unreachable unless asked for by name: rebooting a
+running GitLab is not a decision a configuration run should take.
 
 The HTTP checks dial the loopback interface with a `Host` header, so they do
 not depend on DNS or on the certificate matching the address dialled — which
@@ -600,13 +637,14 @@ are skipped.
 --------
 
 `preflight`, `os`, `repository`, `install`, `firewall`, `tls`, `config`,
-`backup-schedule`, `validate`, `report`, plus two entry points that also carry
-`never`, so they are unreachable unless asked for explicitly:
+`service`, `backup-schedule`, `validate`, `report`, plus three entry points
+that also carry `never`, so they are unreachable unless asked for explicitly:
 
 | Tag | Runs |
 | --- | --- |
 | `backup` | A backup of the running instance, and nothing else |
 | `upgrade` | The upgrade path, and only when `gitlab_upgrade_enabled` is true |
+| `reboot-test` | Reboots the host and verifies GitLab comes back by itself |
 
 ```bash
 # Re-render the configuration and apply it, nothing else.

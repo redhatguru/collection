@@ -52,6 +52,14 @@
   ansible.builtin.meta: flush_handlers
   tags: always
 
+# After the configuration has been applied, because the unit only exists once
+# the package is installed and only supervises something once GitLab has been
+# reconfigured.
+- name: "ALL | Ensure GitLab comes back by itself after a reboot"
+  ansible.builtin.include_tasks: service.yml
+  tags: service
+  when: gitlab_service_enabled | bool
+
 - name: "ALL | Ensure the GitLab backups are scheduled"
   ansible.builtin.include_tasks: backup.yml
   tags: backup-schedule
@@ -71,6 +79,12 @@
 - name: "ALL | Take a backup of this instance now"
   ansible.builtin.include_tasks: backup-create.yml
   tags: [backup, never]
+
+# Opt-in entry point: `--tags reboot-test` reboots the host and proves GitLab
+# returns without help.
+- name: "ALL | Reboot this host and verify GitLab comes back"
+  ansible.builtin.include_tasks: reboot-test.yml
+  tags: [reboot-test, never]
 
 # Opt-in twice over: `--tags upgrade` and gitlab_upgrade_enabled.
 - name: "ALL | Upgrade this instance to the pinned release"
