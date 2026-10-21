@@ -26,7 +26,9 @@ gitlab_runner_version: "19.5.0-1"
 #
 # Registration tokens no longer exist. The role creates the runner through
 # GitLab's API and uses the authentication token that call returns, which
-# needs a personal or group access token with the create_runner scope:
+# needs a personal or group access token ('glpat-') with the create_runner
+# scope — plus read_api, because the group below is named by path rather than
+# by numeric ID:
 #   ansible-vault encrypt_string --name vault_gitlab_create_runner_token '<value>'
 #
 # A host that is already registered keeps its own token, so re-running this

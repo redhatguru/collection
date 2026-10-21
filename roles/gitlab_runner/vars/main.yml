@@ -177,12 +177,15 @@ gitlab_runner_api_explanations:
     No answer at all: the call did not reach GitLab.
   401: >-
     GitLab rejected the token in gitlab_runner_api_token: it is unknown,
-    expired or revoked. On a first run this is usually the placeholder still
-    being in place.
+    expired, revoked — or not an access token at all. A 'glrt-' token is a
+    runner authentication token and cannot call the API; it belongs in
+    gitlab_runner_authentication_token, which skips the API entirely.
   403: >-
-    The token is valid but not allowed to do this. It needs the create_runner
-    scope, and the account that owns it needs Owner on the group (or
-    Maintainer on the project) it is registering into.
+    The token is valid but not allowed to do this. Creating a runner needs the
+    create_runner scope; resolving a group or project by path needs read_api
+    as well, because that is an API read which create_runner does not cover —
+    name the target by its numeric ID to avoid it. The account that owns the
+    token also needs Owner on the group, or Maintainer on the project.
   404: >-
     Nothing of that name is visible to this token — check the full path as it
     appears in the URL ("platform/infra", not the display name), and that the

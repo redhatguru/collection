@@ -108,10 +108,19 @@ gitlab_runner_package_hold: true
 # A "glrt-" token. Keep it in Ansible Vault.
 gitlab_runner_authentication_token: ""
 
-# A personal or group access token with the create_runner scope, held by
-# someone with permission on the target. Used once, to create the runner —
-# never written to the host. Keep it in Ansible Vault, and prefer a group
-# access token scoped to the group you are registering into.
+# A personal or group access token ('glpat-') held by someone with permission
+# on the target. Used once, to create the runner — never written to the host.
+# Keep it in Ansible Vault, and prefer a group access token scoped to the
+# group you are registering into.
+#
+# Scopes: create_runner, plus read_api when the group or project below is
+# named by path rather than by numeric ID — resolving a path is an API read,
+# which create_runner does not grant. Naming the numeric ID keeps the token
+# down to create_runner alone.
+#
+# Not to be confused with the 'glrt-' token GitLab shows when you create a
+# runner in its UI: that one goes in gitlab_runner_authentication_token above
+# and needs no API access at all.
 gitlab_runner_api_token: ""
 
 # Verification of GitLab's certificate for that one API call. Leave it on; for

@@ -129,9 +129,22 @@ POST /api/v4/user/runners
 ```
 
 What you supply is `gitlab_runner_api_token`: a **personal or group access
-token with the `create_runner` scope**, held by someone with permission on the
-target. Keep it in Ansible Vault. It is used once, for that one call, and is
-never written to the host.
+token** (`glpat-…`), held by someone with permission on the target. Keep it in
+Ansible Vault. It is used once, for that one call, and is never written to the
+host.
+
+Its scopes depend on how you name the target:
+
+| You set | Scopes the token needs | Why |
+| --- | --- | --- |
+| `gitlab_runner_group: 77` (numeric ID) | `create_runner` | The create call takes the ID as it is |
+| `gitlab_runner_group: "platform/infra"` (path) | `create_runner` **and** `read_api` | Resolving a path is an API read, which `create_runner` does not grant |
+
+Do not confuse it with the `glrt-…` token GitLab shows you when you create a
+runner in its UI. That is a runner authentication token: it cannot call the
+API at all, and it belongs in `gitlab_runner_authentication_token`, which
+skips the API entirely. Putting it in `gitlab_runner_api_token` produces a
+401, and the preflight checks refuse it with that explanation.
 
 The role takes the token from the first of these it finds:
 

@@ -138,6 +138,22 @@
       ID, or a full path like 'platform/infra'.
     quiet: true
 
+# create_runner grants exactly one thing: creating runners. Resolving a group
+# or project *path* is an API read, which it does not cover — so a token with
+# only that scope has to name the target by its numeric ID.
+- name: "ALL | Report what the access token will have to be allowed to do"
+  ansible.builtin.debug:
+    msg: >-
+      '{{ gitlab_runner_scope_target | trim }}' is a path, so this run reads
+      it from GitLab's API before creating the runner: the access token needs
+      read_api as well as create_runner. A token with only create_runner works
+      if you name the {{ gitlab_runner_scope }} by its numeric ID instead —
+      GitLab shows it on the {{ gitlab_runner_scope }}'s overview page.
+  when:
+    - gitlab_runner_api_token | length > 0
+    - gitlab_runner_scope in ['group', 'project']
+    - not gitlab_runner_scope_target_is_id | bool
+
 - name: "ALL | Ensure there is a way to get an authentication token"
   ansible.builtin.assert:
     that:
@@ -152,6 +168,24 @@
       the runner itself. GitLab removed registration tokens, so there is
       nothing to read off a group or project.
     quiet: true
+
+# Both are called "token" and one of them is what GitLab shows you when you
+# create a runner in the UI, so this swap is easy to make and impossible to
+# diagnose from the 401 it produces.
+- name: "ALL | Ensure the access token is not a runner token in disguise"
+  ansible.builtin.assert:
+    that:
+      - not gitlab_runner_api_token is match('^glrt-')
+    fail_msg: >-
+      gitlab_runner_api_token starts with 'glrt-', which makes it a runner
+      authentication token rather than an access token — it cannot call
+      GitLab's API, and GitLab answers 401. If you created the runner in
+      GitLab's UI, that token belongs in
+      gitlab_runner_authentication_token instead, and then the role needs no
+      API access at all. If you want the role to create the runner, use a
+      personal or group access token ('glpat-') with the create_runner scope.
+    quiet: true
+  when: gitlab_runner_api_token | length > 0
 
 # A placeholder gets through every check that only asks whether a token is
 # set, and then costs a full run — Docker, the runner, a fetched certificate —
