@@ -61,6 +61,7 @@
       df --block-size=1M --output=avail,target "$path"
   register: gitlab_preflight_disk
   changed_when: false
+  check_mode: false
   loop: "{{ gitlab_preflight_disk_paths }}"
   loop_control:
     label: "{{ item }}"
@@ -163,6 +164,26 @@
   when:
     - gitlab_preflight_check_external_url_resolves | bool
     - gitlab_external_url_host is not match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+
+# The password only counts on the first reconfigure, so an instance that is
+# already installed has nothing to refuse here.
+- name: "ALL | Ensure a new instance does not start with the placeholder root password"
+  ansible.builtin.assert:
+    that:
+      - gitlab_initial_root_password not in gitlab_preflight_root_password_placeholders
+    fail_msg: >-
+      gitlab_initial_root_password is still a placeholder, and that placeholder
+      is in a public repository — GitLab would come up with a root account
+      anyone can sign in to. Keep the real one in Ansible Vault:
+      `ansible-vault encrypt_string --name vault_gitlab_root_password '<value>'`.
+      Nothing is installed on this host until it is set.
+    quiet: true
+  vars:
+    gitlab_preflight_root_password_placeholders:
+      - "ChangeMe"
+      - "ChangeMe123!"
+      - "changeme"
+  when: not gitlab_preflight_already_installed | bool
 
 - name: "ALL | Ensure the requested GitLab release is well formed"
   ansible.builtin.assert:
@@ -287,6 +308,7 @@
     timeout: 30
   register: gitlab_preflight_repository
   changed_when: false
+  check_mode: false
   failed_when: false
   when: gitlab_preflight_check_repository_reachable | bool
 

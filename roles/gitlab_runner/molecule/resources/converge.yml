@@ -64,7 +64,9 @@
 
     # What an operator does in the UI — Settings > Access Tokens with the
     # create_runner scope — done from the Rails console, because a Molecule
-    # run has nobody to click it.
+    # run has nobody to click it. Never reported as changed: this is the test's
+    # own setup, and it would otherwise fail the idempotence check on every run
+    # whatever the role did.
     - name: Mint an access token with the create_runner scope
       ansible.builtin.command:
         argv:
@@ -80,7 +82,7 @@
             puts token.token
       become: true
       register: gitlab_runner_test_pat
-      changed_when: true
+      changed_when: false
       no_log: true
 
     - name: Publish that token for the runner play

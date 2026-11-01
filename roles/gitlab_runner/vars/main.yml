@@ -40,11 +40,6 @@ gitlab_runner_supported_scopes:
 
 gitlab_runner_package_name: "gitlab-runner"
 
-gitlab_runner_repository_url: "https://packages.gitlab.com/runner/gitlab-runner/ubuntu"
-gitlab_runner_repository_gpg_key_url: "https://packages.gitlab.com/runner/gitlab-runner/gpgkey"
-gitlab_runner_repository_suite: "{{ ansible_facts['distribution_release'] }}"
-gitlab_runner_repository_components: "main"
-
 gitlab_runner_apt_keyring_dir: "/etc/apt/keyrings"
 gitlab_runner_apt_keyring_file: "{{ gitlab_runner_apt_keyring_dir }}/gitlab-runner.asc"
 gitlab_runner_apt_repository_filename: "gitlab-runner"
@@ -52,7 +47,9 @@ gitlab_runner_apt_repository_filename: "gitlab-runner"
 gitlab_runner_docker_engine_keyring_file: "{{ gitlab_runner_apt_keyring_dir }}/docker.asc"
 gitlab_runner_docker_engine_repository_filename: "docker"
 
-gitlab_runner_docker_engine_architecture: "{{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else 'arm64' }}"
+# Ansible's architecture fact mapped onto the name both repositories publish
+# packages under.
+gitlab_runner_repository_architecture: "{{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else 'arm64' }}"
 
 gitlab_runner_os_packages:
   - ca-certificates
@@ -71,7 +68,6 @@ gitlab_runner_config_file: "{{ gitlab_runner_config_dir }}/config.toml"
 gitlab_runner_certs_dir: "{{ gitlab_runner_config_dir }}/certs"
 gitlab_runner_command: "/usr/bin/gitlab-runner"
 gitlab_runner_service_name: "gitlab-runner"
-gitlab_runner_user: "gitlab-runner"
 gitlab_runner_docker_socket: "/var/run/docker.sock"
 
 # --------------------------------------------------------------------------

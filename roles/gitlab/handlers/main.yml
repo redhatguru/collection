@@ -12,7 +12,6 @@
   ansible.builtin.command:
     argv: ["{{ gitlab_ctl_command }}", reconfigure]
   become: true
-  register: gitlab_reconfigure
   changed_when: true
 
 # Handlers run in the order they are defined here, not in the order they were

@@ -12,7 +12,8 @@
   quoted and escaped, booleans become true/false, None becomes nil, and lists
   and dicts become Ruby arrays and hashes. That is what lets a plain YAML
   variable configure a Ruby file without the caller having to think about
-  quoting.
+  quoting. The hash is escaped because Ruby interpolates "#{...}" inside double
+  quotes, which would run part of a password that happens to contain it.
 -#}
 {%- macro rb(value) -%}
 {%- if value is boolean -%}
@@ -22,9 +23,9 @@ nil
 {%- elif value is number -%}
 {{ value }}
 {%- elif value is string -%}
-{{ value | to_json }}
+{{ value | to_json | replace('#', '\\#') }}
 {%- elif value is mapping -%}
-{ {% for key, item in value.items() %}{{ key | to_json }} => {{ rb(item) }}{{ ', ' if not loop.last }}{% endfor %} }
+{ {% for key, item in value.items() %}{{ key | to_json | replace('#', '\\#') }} => {{ rb(item) }}{{ ', ' if not loop.last }}{% endfor %} }
 {%- elif value is sequence -%}
 [{% for item in value %}{{ rb(item) }}{{ ', ' if not loop.last }}{% endfor %}]
 {%- else -%}

@@ -20,7 +20,7 @@
     uris: "{{ gitlab_runner_docker_engine_repository_url }}"
     suites: "{{ gitlab_runner_docker_engine_suite }}"
     components: "{{ gitlab_runner_docker_engine_components }}"
-    architectures: "{{ gitlab_runner_docker_engine_architecture }}"
+    architectures: "{{ gitlab_runner_repository_architecture }}"
     signed_by: "{{ gitlab_runner_docker_engine_keyring_file }}"
     enabled: true
     state: present

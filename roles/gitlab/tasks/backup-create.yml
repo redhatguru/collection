@@ -11,7 +11,7 @@
 # otherwise it is a job for whatever backs up the rest of your estate.
 
 - name: "ALL | Ensure both backup destinations exist"
-  ansible.builtin.include_tasks: backup-dirs.yml
+  ansible.builtin.import_tasks: backup-dirs.yml
 
 - name: "ALL | List the GitLab archives that exist before this backup runs"
   ansible.builtin.find:

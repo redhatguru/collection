@@ -106,7 +106,7 @@ gitlab_version: ""
 # Hold the package in dpkg so unattended-upgrades and a stray `apt upgrade`
 # cannot move GitLab to a new version behind your back — a GitLab upgrade
 # runs database migrations, so it is never a routine package update. The
-# upgrade path lifts the hold for exactly as long as it needs it.
+# upgrade path installs past the hold, which stays in place throughout.
 gitlab_package_hold: true
 
 # Refuse an upgrade that skips a required stop on GitLab's upgrade path (more
@@ -334,7 +334,7 @@ gitlab_backup_archive_permissions: "0o600"
 # Components to leave out of the data backup, e.g. ["registry", "artifacts"]
 # when those live in object storage that is backed up separately. Valid
 # values: db, uploads, builds, artifacts, lfs, terraform_state, registry,
-# pages, repositories, packages.
+# pages, repositories, packages, ci_secure_files.
 gitlab_backup_skip: []
 
 gitlab_backup_schedule_enabled: true
@@ -480,6 +480,11 @@ gitlab_rails_extra_configuration: {}
 # a simple assignment. Rendered verbatim and never parsed by the role.
 gitlab_extra_configuration: ""
 
+# Ruby syntax check run against the rendered gitlab.rb before it is applied:
+# a typo in an override is caught here instead of half way through a
+# reconfigure. Set to an empty string to skip it.
+gitlab_config_validate_command: "/opt/gitlab/embedded/bin/ruby -c %s"
+
 # --------------------------------------------------------------------------
 # Validation
 # --------------------------------------------------------------------------
@@ -556,6 +561,5 @@ gitlab_reboot_test_timeout: 900
 # Reporting
 # --------------------------------------------------------------------------
 
-# Add the full `gitlab-ctl status` output and the installed component versions
-# to the end-of-run report.
+# Add the full `gitlab-ctl status` output to the end-of-run report.
 gitlab_debug: false

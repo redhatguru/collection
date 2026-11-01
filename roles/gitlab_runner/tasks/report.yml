@@ -7,8 +7,8 @@
       - "GitLab              : {{ gitlab_runner_url }}"
       - "Runner              : {{ gitlab_runner_description }}"
       - "Scope               : {{ gitlab_runner_scope_description | trim }}"
-      - "Runner ID in GitLab : {{ gitlab_runner_created_id | default('', true) | default('existing runner', true) }}"
-      - "Token came from     : {{ gitlab_runner_token_source }}"
+      - "Runner ID in GitLab : {{ gitlab_runner_created_id | default('existing runner', true) }}"
+      - "Token came from     : {{ gitlab_runner_token_source | default('not resolved in this run') }}"
       - "Installed release   : {{ gitlab_runner_installed_version | default('unknown', true) }}"
       - "Executor            : {{ gitlab_runner_executor }}{{ ', default image ' ~ gitlab_runner_docker_image if gitlab_runner_executor == 'docker' else '' }}"
       - "Privileged jobs     : {{ 'yes — a job can take over this host' if gitlab_runner_docker_privileged | bool else 'no' }}"
@@ -23,6 +23,7 @@
   become: true
   register: gitlab_runner_report_list
   changed_when: false
+  check_mode: false
   failed_when: false
   when: gitlab_runner_debug | bool
 

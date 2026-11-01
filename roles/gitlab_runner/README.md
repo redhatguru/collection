@@ -180,6 +180,10 @@ and are deliberately not overridable.
 | `gitlab_runner_ca_certificate_src` / `_content` | `""` | A certificate you supply instead of fetching |
 | `gitlab_runner_version` | `""` | Package release, e.g. `19.5.0-1`. Empty installs the newest |
 | `gitlab_runner_package_hold` | `true` | Hold the package in dpkg |
+| `gitlab_runner_repository_url` | `https://packages.gitlab.com/runner/gitlab-runner/ubuntu` | Package repository, or a mirror of it |
+| `gitlab_runner_repository_gpg_key_url` | `https://packages.gitlab.com/runner/gitlab-runner/gpgkey` | Its signing key |
+| `gitlab_runner_repository_suite` | the host's release | Ubuntu codename to pull packages for |
+| `gitlab_runner_repository_components` | `main` | |
 | `gitlab_runner_scope` | `instance` | `instance`, `group` or `project` |
 | `gitlab_runner_group` / `_project` | `""` | Numeric ID or full path |
 | `gitlab_runner_description` | the hostname | Name shown in GitLab |
@@ -361,7 +365,8 @@ unit that is running but not enabled looks identical until the host
 restarts.
 
 ```bash
-# Re-render the configuration and restart the runner, nothing else.
+# Re-render the configuration and restart the runner if it changed. The
+# certificate and token tasks run too, because the file is built from them.
 ansible-playbook playbooks/gitlab-runner.yml --tags config
 
 # Check an existing runner without changing anything.

@@ -26,6 +26,7 @@
       - "gitlab_rails['env'] = { \"MOLECULE_TEST\" => \"true\" }"
       - "nginx['client_max_body_size'] = \"512m\""
       - "prometheus_monitoring['enable'] = false"
+      - "gitlab_rails['gitlab_email_display_name'] = \"GitLab \\#{molecule}\""
 
   tasks:
     # Everything below is checked on an instance that has just come back from

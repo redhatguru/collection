@@ -92,6 +92,8 @@ The preflight also refuses to continue when:
   there cannot be upgraded further without moving the host first;
 - `gitlab_external_url` is not an http/https URL with a real host name, or
   that name does not resolve on the host;
+- `gitlab_initial_root_password` is still a placeholder on a host GitLab is not
+  installed on yet — that placeholder is in a public repository;
 - `gitlab_version` is set but is not a package version like `19.5.0-ce.0`;
 - GitLab would have no database, or two;
 - the URL is https but there is neither a certificate nor Let's Encrypt;
@@ -102,8 +104,9 @@ The preflight also refuses to continue when:
 - `packages.gitlab.com` is unreachable.
 
 **The controller.** ansible-core >= 2.15, plus the collections in
-[`requirements.yml`](requirements.yml) — `community.general` and
-`ansible.posix`, both only for the Molecule scenario.
+[`requirements.yml`](requirements.yml) — `community.general` for the host
+firewall, `community.crypto` for the `self-signed` certificate source and
+`ansible.posix` for the Molecule scenario.
 
 **The network.** The host needs HTTPS to `packages.gitlab.com` for the
 install. The role manages the host firewall itself — see
@@ -198,7 +201,7 @@ Every variable is prefixed `gitlab_`.
 | --- | --- | --- |
 | `gitlab_external_url` | `http://<fqdn>` | The URL clients use. Every clone URL, email link and OAuth redirect is built from it |
 | `gitlab_time_zone` | `UTC` | |
-| `gitlab_initial_root_password` | `ChangeMe123!` | Applied on the first reconfigure only. Override from Vault |
+| `gitlab_initial_root_password` | `ChangeMe123!` | Applied on the first reconfigure only. Override from Vault: the preflight refuses to install a new instance with this placeholder |
 | `gitlab_shell_ssh_port` | `22` | Port advertised in SSH clone URLs. Does not move `sshd` |
 | `gitlab_trusted_proxies` | `[]` | Reverse proxies in front of GitLab, so it logs and rate-limits the real client address |
 
@@ -732,5 +735,5 @@ and check for pending migrations with
 section 9.
 
 **`apt` refuses to upgrade `gitlab-ce`.** Also by design: the package is held
-(`gitlab_package_hold`). The upgrade path lifts the hold for as long as it
-needs it.
+(`gitlab_package_hold`). The upgrade path installs past the hold, which stays
+in place throughout.

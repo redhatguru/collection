@@ -25,6 +25,7 @@
   become: true
   register: gitlab_report_status
   changed_when: false
+  check_mode: false
   when: gitlab_debug | bool
 
 - name: "ALL | Print the full GitLab state"

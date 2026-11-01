@@ -15,6 +15,7 @@
   become: true
   register: gitlab_validate_services
   changed_when: false
+  check_mode: false
   failed_when: false
   retries: "{{ gitlab_validate_retries | int }}"
   delay: "{{ gitlab_validate_delay | int }}"
@@ -87,6 +88,7 @@
     timeout: 30
   register: gitlab_validate_endpoints
   changed_when: false
+  check_mode: false
   retries: "{{ gitlab_validate_retries | int }}"
   delay: "{{ gitlab_validate_delay | int }}"
   until: gitlab_validate_endpoints is not failed
@@ -130,6 +132,7 @@
   become: true
   register: gitlab_validate_migrations
   changed_when: false
+  check_mode: false
   failed_when: false
   when: gitlab_validate_check_migrations | bool
 
@@ -167,6 +170,7 @@
       delegate_to: localhost
       become: false
       changed_when: false
+      check_mode: false
 
   rescue:
     - name: "ALL | Report that clients cannot reach GitLab"
@@ -203,6 +207,7 @@
     argv: [systemctl, is-enabled, "{{ item }}"]
   register: gitlab_validate_boot_units
   changed_when: false
+  check_mode: false
   failed_when: false
   loop: >-
     {{ [gitlab_runsvdir_service_name]
@@ -248,19 +253,20 @@
 # A host can therefore have ufw.service enabled and no firewall at all — so
 # the unit check alone would report a firewall that is not there, before or
 # after a reboot.
-- name: "ALL | Check whether the firewall is actually loaded"
+- name: "DEBIAN | Check whether the firewall is actually loaded"
   ansible.builtin.command:
     argv: [ufw, status]
   become: true
   register: gitlab_validate_firewall_state
   changed_when: false
+  check_mode: false
   failed_when: false
   when:
     - gitlab_validate_check_boot | bool
     - gitlab_firewall_enabled | bool
     - gitlab_firewall_manage_state | bool
 
-- name: "ALL | Ensure the firewall is on, not merely installed"
+- name: "DEBIAN | Ensure the firewall is on, not merely installed"
   ansible.builtin.assert:
     that:
       # Quoted, because the colon in 'Status: active' would otherwise make
@@ -285,6 +291,7 @@
     argv: [findmnt, --fstab, --types, swap, --noheadings]
   register: gitlab_validate_swap_fstab
   changed_when: false
+  check_mode: false
   failed_when: false
   when:
     - gitlab_validate_check_swap_persistent | bool
@@ -307,7 +314,7 @@
     - gitlab_validate_check_swap_persistent | bool
     - ansible_facts['swaptotal_mb'] | int > 0
 
-- name: "ALL | Ensure the GitLab configuration and secrets are readable by root only"
+- name: "ALL | Collect the owner and mode of the GitLab configuration and secrets"
   ansible.builtin.stat:
     path: "{{ item }}"
   become: true
@@ -341,6 +348,7 @@
   become: true
   register: gitlab_validate_self_check
   changed_when: false
+  check_mode: false
   failed_when: false
   when: gitlab_validate_run_gitlab_check | bool
 

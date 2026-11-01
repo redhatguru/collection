@@ -127,29 +127,23 @@
   when: gitlab_upgrade_needed | bool
 
 - name: "ALL | Back the instance up before replacing the package"
-  ansible.builtin.include_tasks: backup-create.yml
+  ansible.builtin.import_tasks: backup-create.yml
   when:
     - gitlab_upgrade_needed | bool
     - gitlab_upgrade_backup_before | bool
 
-# The hold is what stops anything else from upgrading GitLab; lifting it is
-# part of the upgrade, and it goes back on below.
-- name: "DEBIAN | Allow the GitLab package to be replaced"
-  ansible.builtin.dpkg_selections:
-    name: "{{ gitlab_package_name }}"
-    selection: install
-  become: true
-  when: gitlab_upgrade_needed | bool
-
-- name: "DEBIAN | Install the GitLab release this upgrade targets"
+# Installed past the hold rather than by lifting it first, so a failed apt
+# cannot leave the package open to the next unattended-upgrades run.
+- name: "DEBIAN | Ensure the GitLab release this upgrade targets is installed"
   ansible.builtin.apt:
     name: "{{ gitlab_package_name }}={{ gitlab_version }}"
     state: present
+    allow_change_held_packages: true
     update_cache: true
   become: true
   when: gitlab_upgrade_needed | bool
 
-- name: "DEBIAN | Hold the GitLab package at the release just installed"
+- name: "DEBIAN | Ensure the GitLab package is {{ 'held at the release just installed' if gitlab_package_hold | bool else 'not held' }}"
   ansible.builtin.dpkg_selections:
     name: "{{ gitlab_package_name }}"
     selection: "{{ 'hold' if gitlab_package_hold | bool else 'install' }}"
@@ -179,7 +173,6 @@
   ansible.builtin.command:
     argv: ["{{ gitlab_ctl_command }}", reconfigure]
   become: true
-  register: gitlab_upgrade_reconfigure
   changed_when: true
   when: gitlab_upgrade_needed | bool
 
@@ -191,7 +184,7 @@
   when: gitlab_upgrade_needed | bool
 
 - name: "ALL | Verify the instance that came back is healthy and is the new release"
-  ansible.builtin.include_tasks: validate.yml
+  ansible.builtin.import_tasks: validate.yml
   when:
     - gitlab_upgrade_needed | bool
     - gitlab_validate_enabled | bool

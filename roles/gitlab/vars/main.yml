@@ -84,11 +84,6 @@ gitlab_backup_command: "/usr/bin/gitlab-backup"
 # that reports the version actually running rather than the one installed.
 gitlab_version_file: "/opt/gitlab/embedded/service/gitlab-rails/VERSION"
 
-# Ruby syntax check run against the rendered gitlab.rb before it is applied:
-# a typo in an override is caught here instead of half way through a
-# reconfigure. Set to an empty string to skip it.
-gitlab_config_validate_command: "/opt/gitlab/embedded/bin/ruby -c %s"
-
 # --------------------------------------------------------------------------
 # The external URL, taken apart
 # --------------------------------------------------------------------------

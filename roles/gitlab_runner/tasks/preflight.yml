@@ -23,7 +23,10 @@
     fail_msg: >-
       There is no GitLab Runner repository for Ubuntu
       '{{ gitlab_runner_repository_suite }}'. Packages are published for
-      {{ gitlab_runner_supported_ubuntu_releases | join(', ') }}.
+      {{ gitlab_runner_supported_ubuntu_releases | join(', ') }}. On a newer
+      Ubuntu than GitLab has caught up with, point
+      gitlab_runner_repository_suite at the most recent supported codename
+      deliberately.
     quiet: true
 
 - name: "ALL | Measure the free space on the filesystems a runner fills"
@@ -40,6 +43,7 @@
       df --block-size=1M --output=avail,target "$path"
   register: gitlab_runner_preflight_disk
   changed_when: false
+  check_mode: false
   loop: "{{ gitlab_runner_preflight_disk_paths }}"
   loop_control:
     label: "{{ item }}"
@@ -223,7 +227,7 @@
     quiet: true
   when: gitlab_runner_authentication_token | length > 0
 
-- name: "ALL | Ensure a self-signed GitLab comes with the certificate to trust"
+- name: "ALL | Ensure the certificate to trust comes from one source only"
   ansible.builtin.assert:
     that:
       - gitlab_runner_ca_certificate_src | length == 0
@@ -247,6 +251,7 @@
         port: "{{ gitlab_runner_url_port | int }}"
         timeout: 20
       changed_when: false
+      check_mode: false
 
   rescue:
     - name: "ALL | Report that GitLab cannot be reached from this host"

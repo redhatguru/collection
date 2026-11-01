@@ -6,44 +6,48 @@
 # anything talks to GitLab, because on an instance with a self-signed
 # certificate nothing can otherwise; and the token is resolved before the
 # configuration is written, because the token is the only thing in that file
-# the role cannot derive.
+# the role cannot derive. Both therefore also carry the config tag: config.toml
+# cannot be rendered without what they resolve.
+#
+# Imported rather than included: tags on an include_tasks stop at the include
+# itself, so `--tags config` would reach it and then skip every task inside.
 
 - name: "ALL | Verify this host can carry a runner"
-  ansible.builtin.include_tasks: preflight.yml
+  ansible.builtin.import_tasks: preflight.yml
   tags: preflight
   when: gitlab_runner_preflight_enabled | bool
 
 - name: "ALL | Prepare the operating system"
-  ansible.builtin.include_tasks: os.yml
+  ansible.builtin.import_tasks: os.yml
   tags: os
 
 - name: "ALL | Ensure the official GitLab Runner repository is available"
-  ansible.builtin.include_tasks: repository.yml
+  ansible.builtin.import_tasks: repository.yml
   tags: repository
 
 - name: "ALL | Ensure the Docker engine is installed and running"
-  ansible.builtin.include_tasks: docker.yml
+  ansible.builtin.import_tasks: docker.yml
   tags: docker
   when: gitlab_runner_docker_engine_install | bool
 
 - name: "ALL | Ensure GitLab Runner is installed"
-  ansible.builtin.include_tasks: install.yml
+  ansible.builtin.import_tasks: install.yml
   tags: install
 
 # Before anything calls GitLab: the API call that creates the runner and the
 # runner itself both verify the certificate, and on an instance no public CA
 # signed for, both fail without this.
 - name: "ALL | Ensure the runner trusts GitLab's certificate"
-  ansible.builtin.include_tasks: certificate.yml
-  tags: certificate
+  ansible.builtin.import_tasks: certificate.yml
+  tags: [certificate, config]
   when: gitlab_runner_ca_certificate_supplied | bool or gitlab_runner_ca_certificate_fetch | bool
 
 - name: "ALL | Resolve the authentication token this runner registers with"
-  ansible.builtin.include_tasks: token.yml
-  tags: token
+  ansible.builtin.import_tasks: token.yml
+  tags: [token, config]
 
 - name: "ALL | Ensure the runner configuration matches the role's variables"
-  ansible.builtin.include_tasks: configure.yml
+  ansible.builtin.import_tasks: configure.yml
   tags: config
 
 # Flushed here rather than at the end of the play: the validation below asks
@@ -54,15 +58,15 @@
   tags: always
 
 - name: "ALL | Ensure the runner comes back by itself after a reboot"
-  ansible.builtin.include_tasks: service.yml
+  ansible.builtin.import_tasks: service.yml
   tags: service
   when: gitlab_runner_service_enabled | bool
 
 - name: "ALL | Verify the runner is registered and able to run jobs"
-  ansible.builtin.include_tasks: validate.yml
+  ansible.builtin.import_tasks: validate.yml
   tags: validate
   when: gitlab_runner_validate_enabled | bool
 
 - name: "ALL | Print the runner report"
-  ansible.builtin.include_tasks: report.yml
+  ansible.builtin.import_tasks: report.yml
   tags: report

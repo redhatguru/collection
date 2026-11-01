@@ -31,6 +31,12 @@ gitlab_kas_enabled: false
 # rendered from variables: each one is checked in the file on the host.
 gitlab_time_zone: "Europe/Amsterdam"
 gitlab_nginx_client_max_body_size: "512m"
+
+# Ruby interpolates "#{...}" inside double quotes, so a reconfigure raises a
+# NameError on this value unless the template escapes it. A password containing
+# those characters takes the same path.
+gitlab_email_display_name: "GitLab #{molecule}"
+
 gitlab_rails_extra_configuration:
   gitlab_default_theme: 2
   gitlab_username_changing_enabled: false

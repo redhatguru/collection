@@ -7,6 +7,7 @@
     argv: [systemctl, is-active, "{{ gitlab_runner_service_name }}"]
   register: gitlab_runner_validate_service
   changed_when: false
+  check_mode: false
   failed_when: false
   when: gitlab_runner_validate_check_service | bool
 
@@ -31,6 +32,7 @@
   become: true
   register: gitlab_runner_validate_verify
   changed_when: false
+  check_mode: false
   failed_when: false
   retries: 6
   delay: 5
@@ -57,6 +59,7 @@
   become: true
   register: gitlab_runner_validate_docker
   changed_when: false
+  check_mode: false
   failed_when: false
   when:
     - gitlab_runner_validate_check_docker | bool
@@ -125,6 +128,7 @@
   become: true
   register: gitlab_runner_validate_certificate
   changed_when: false
+  check_mode: false
   failed_when: false
   when:
     - gitlab_runner_validate_check_certificate | bool
@@ -154,6 +158,7 @@
     argv: [systemctl, is-enabled, "{{ item }}"]
   register: gitlab_runner_validate_boot_units
   changed_when: false
+  check_mode: false
   failed_when: false
   loop: >-
     {{ [gitlab_runner_service_name]
@@ -183,7 +188,7 @@
     label: "{{ item.item }}"
   when: gitlab_runner_validate_check_boot | bool
 
-- name: "ALL | Ensure the runner's credentials are readable by root only"
+- name: "ALL | Collect the owner and mode of the runner's configuration"
   ansible.builtin.stat:
     path: "{{ gitlab_runner_config_file }}"
   become: true

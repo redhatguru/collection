@@ -1,0 +1,23 @@
+---
+# Installs and configures a single-node GitLab on each host in the
+# gitlab_servers group.
+#
+#   ansible-playbook -i inventories/lab-gitlab/hosts.yml playbooks/gitlab.yml
+#
+# This play deliberately carries no variables of its own, so everything comes
+# from inventory and can be overridden per host — see
+# inventories/lab-gitlab/group_vars/gitlab_servers.yml. A new instance needs
+# gitlab_initial_root_password set, from Ansible Vault: the role refuses to
+# install with the placeholder.
+#
+# The role is listed under `roles:` rather than pulled in with include_role,
+# because that is what lets --tags reach the tasks inside it.
+#
+# become is set per task inside the role rather than for the whole play, so
+# the tasks that do not need root do not get it.
+- name: Install and configure GitLab
+  hosts: gitlab_servers
+  gather_facts: true
+
+  roles:
+    - role: redhatguru.general.gitlab

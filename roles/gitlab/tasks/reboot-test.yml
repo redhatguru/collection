@@ -28,7 +28,7 @@
 # mount came back late, Puma up before PostgreSQL, a firewall whose rules
 # were never persisted.
 - name: "ALL | Verify the instance that came back is the one that went down"
-  ansible.builtin.include_tasks: validate.yml
+  ansible.builtin.import_tasks: validate.yml
 
 - name: "ALL | Report the completed reboot test"
   ansible.builtin.debug:

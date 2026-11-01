@@ -88,6 +88,13 @@ gitlab_runner_version: ""
 # a release your pipelines have not seen.
 gitlab_runner_package_hold: true
 
+# Point these at a mirror where hosts cannot reach packages.gitlab.com. The
+# suite is the host's own release unless you are deliberately pinning another.
+gitlab_runner_repository_url: "https://packages.gitlab.com/runner/gitlab-runner/ubuntu"
+gitlab_runner_repository_gpg_key_url: "https://packages.gitlab.com/runner/gitlab-runner/gpgkey"
+gitlab_runner_repository_suite: "{{ ansible_facts['distribution_release'] }}"
+gitlab_runner_repository_components: "main"
+
 # --------------------------------------------------------------------------
 # How the runner gets its token
 # --------------------------------------------------------------------------

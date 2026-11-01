@@ -143,6 +143,8 @@
         url: "https://{{ gitlab_runner_test_hostname }}/api/v4/version"
         ca_path: /etc/gitlab-runner/certs/gitlab.molecule.local.crt
         status_code: [401]
+      # The certificate lives under /etc/gitlab-runner, which is root-only.
+      become: true
       changed_when: false
 
     - name: Collect the Docker version the runner will use

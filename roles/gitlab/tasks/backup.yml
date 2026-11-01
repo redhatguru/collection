@@ -14,7 +14,7 @@
 # takes a backup now.
 
 - name: "ALL | Ensure both backup destinations exist"
-  ansible.builtin.include_tasks: backup-dirs.yml
+  ansible.builtin.import_tasks: backup-dirs.yml
 
 # CRON=1 keeps the job quiet unless something goes wrong, so cron only mails
 # you about a backup that failed.

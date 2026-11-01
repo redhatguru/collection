@@ -65,6 +65,7 @@
     stdin: ""
   register: gitlab_runner_certificate_trusted
   changed_when: false
+  check_mode: false
   failed_when: false
   when:
     - gitlab_runner_ca_certificate_fetch | bool
@@ -100,6 +101,7 @@
     stdin: ""
   register: gitlab_runner_certificate_fetch
   changed_when: false
+  check_mode: false
   when:
     - gitlab_runner_ca_certificate_fetch | bool
     - not gitlab_runner_ca_certificate_supplied | bool
@@ -139,6 +141,7 @@
     stdin: "{{ item }}"
   register: gitlab_runner_certificate_fingerprints
   changed_when: false
+  check_mode: false
   loop: "{{ gitlab_runner_certificate_pem_blocks }}"
   loop_control:
     index_var: gitlab_runner_certificate_index
@@ -247,6 +250,7 @@
   become: true
   register: gitlab_runner_certificate_installed_verify
   changed_when: false
+  check_mode: false
   failed_when: false
   when:
     - gitlab_runner_ca_certificate_fetch | bool
@@ -276,15 +280,19 @@
 # What ended up on the host
 # --------------------------------------------------------------------------
 
+# Also tagged for the two entry points that read this and change nothing:
+# without it they cannot tell a fetched certificate from none at all.
 - name: "ALL | Check which certificate the runner will use"
   ansible.builtin.stat:
     path: "{{ gitlab_runner_ca_certificate_file }}"
   become: true
   register: gitlab_runner_certificate_state
+  tags: [validate, report]
 
 - name: "ALL | Record whether the runner has a certificate of its own to use"
   ansible.builtin.set_fact:
     gitlab_runner_ca_certificate_present: "{{ gitlab_runner_certificate_state.stat.exists }}"
+  tags: [validate, report]
 
 # The fingerprint is what turns the fetch from an act of faith into a
 # verification: it is read off the certificate that is now on the host and
@@ -302,6 +310,7 @@
   become: true
   register: gitlab_runner_certificate_fingerprint_found
   changed_when: false
+  check_mode: false
   when:
     - gitlab_runner_ca_certificate_present | bool
     - gitlab_runner_ca_certificate_fingerprint | length > 0
