@@ -2,9 +2,16 @@
 name: ansible-lint
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   ansible-lint:
@@ -25,6 +32,6 @@ jobs:
         run: yamllint .
 
       - name: Run ansible-lint
-        uses: ansible/ansible-lint@main
+        uses: ansible/ansible-lint@v26.8.0
         with:
           args: "-c ansible-lint.cfg ."
