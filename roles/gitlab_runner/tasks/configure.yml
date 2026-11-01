@@ -1,0 +1,20 @@
+---
+# /etc/gitlab-runner/config.toml is rendered from the role's variables and
+# from nothing else, so the runner's whole configuration is reviewable as a
+# diff. `gitlab-runner register` is deliberately not used: the token resolved
+# in token.yml is all a runner needs, and tasks/validate.yml asks GitLab to
+# confirm it rather than trusting the registration call's own output.
+
+- name: "ALL | Ensure the runner configuration matches the role's variables"
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: "{{ gitlab_runner_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  # The rendered file holds the authentication token, which is a credential
+  # for taking jobs from GitLab: the task reports that it changed without
+  # printing what changed.
+  diff: false
+  notify: "ALL | Restart the runner so it picks up its configuration"

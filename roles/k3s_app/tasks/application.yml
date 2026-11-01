@@ -1,0 +1,99 @@
+---
+# Called once per application with the definition in k3s_app_item.
+# Every object carries k3s_app_state through, so the same definition
+# that creates an application also removes it again. The namespace is the one
+# exception: it is created but never deleted, because deleting a namespace
+# takes everything else in it along, including objects this role never made.
+
+- name: "ALL | Ensure the application namespace exists with its Pod Security labels"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'namespace.yaml.j2') }}"
+    state: present
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  when: k3s_app_state == 'present'
+
+- name: "ALL | Ensure the application service account exists"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'serviceaccount.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+
+- name: "ALL | Ensure the application ConfigMaps match their definition"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'configmap.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  loop: "{{ k3s_app_item.config_maps | default([]) }}"
+  loop_control:
+    loop_var: k3s_app_object
+    label: "{{ k3s_app_object.name }}"
+
+# no_log, because the whole point of the object is its contents. Supply the
+# values from Ansible Vault; never from a plain group_vars file.
+- name: "ALL | Ensure the application Secrets match their definition"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'secret.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  no_log: true
+  loop: "{{ k3s_app_item.secrets | default([]) }}"
+  loop_control:
+    loop_var: k3s_app_object
+    label: "{{ k3s_app_object.name }}"
+
+- name: "ALL | Ensure the application persistent volume claims exist"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'pvc.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  loop: "{{ k3s_app_item.persistent_volume_claims | default([]) }}"
+  loop_control:
+    loop_var: k3s_app_object
+    label: "{{ k3s_app_object.name }}"
+
+- name: "ALL | Ensure the application workload matches its definition"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'workload.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+
+- name: "ALL | Ensure the application Service exposes the workload inside the cluster"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'service.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  when: k3s_app_item.service.enabled | default(true) | bool
+
+- name: "ALL | Ensure the application Ingress routes its hostname to the Service"
+  kubernetes.core.k8s:
+    definition: "{{ lookup('ansible.builtin.template', 'ingress.yaml.j2') }}"
+    state: "{{ k3s_app_state }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  when: k3s_app_item.ingress.enabled | default(false) | bool
+
+- name: "ALL | Ensure the application NetworkPolicies are in force"
+  ansible.builtin.include_tasks: network-policies.yml
+  when: k3s_app_item.network_policy.enabled | default(k3s_app_network_policy_enabled) | bool
+
+- name: "ALL | Wait for the application workload to become available"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: "{{ k3s_app_item.kind | default('Deployment') }}"
+    name: "{{ k3s_app_item.name }}"
+    namespace: "{{ k3s_app_item.namespace }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+    wait: true
+    wait_condition: "{{ k3s_app_wait_conditions[k3s_app_item.kind | default('Deployment')] | default(omit) }}"
+    wait_timeout: "{{ k3s_app_wait_timeout | int }}"
+  become: true
+  when:
+    - k3s_app_state == 'present'
+    - k3s_app_wait | bool

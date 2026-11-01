@@ -1,12 +1,12 @@
 ---
 # tasks for install and create postgress database
-- name: Install EPEL release
+- name: "RHEL | Install EPEL release"
   ansible.builtin.dnf:
     name: epel-release
     state: present
   become: true
 
-- name: Add PostgreSQL PGDG repository
+- name: "RHEL | Add PostgreSQL PGDG repository"
   ansible.builtin.yum_repository:
     name: pgdg
     description: PostgreSQL PGDG YUM repo
@@ -16,7 +16,7 @@
     enabled: true
     gpgcheck: false
 
-- name: Disable builtin postgresql module
+- name: "RHEL | Disable builtin postgresql module"
   ansible.builtin.shell: >
     dnf -qy module disable postgresql
   args:
@@ -27,7 +27,7 @@
   ignore_errors: true
   become: true
 
-- name: Install require packages on EL8 and EL9
+- name: "RHEL | Install require packages on EL8 and EL9"
   ansible.builtin.package:
     name:
       - python3-libselinux
@@ -37,7 +37,7 @@
     state: present
   become: true
 
-- name: Install PostgreSQL {{ postgresql_version }}
+- name: "RHEL | Install PostgreSQL {{ postgresql_version }}"
   ansible.builtin.dnf:
     name: "{{ item }}"
     state: present
@@ -47,7 +47,7 @@
     - "postgresql{{ postgresql_version }}-server"
     - "postgresql{{ postgresql_version }}-contrib"
 
-- name: Open firewall port for PostgreSQL
+- name: "RHEL | Open firewall port for PostgreSQL"
   ansible.posix.firewalld:
     rich_rule: >-
       rule family='ipv4' source address='{{ postgresql_allow_subnet }}'
@@ -58,17 +58,17 @@
   become: true
   when: ansible_facts['virtualization_type'] != 'docker'
 
-- name: Check if database need too initialized
+- name: "RHEL | Check if database need too initialized"
   ansible.builtin.stat:
     path: "/var/lib/pgsql/{{ postgresql_version }}/data/PG_VERSION"
   register: postgresql_data
 
-- name: Systemctl daemon-reload
+- name: "RHEL | Systemctl daemon-reload"
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
 
-- name: Initialize postgres db
+- name: "RHEL | Initialize postgres db"
   ansible.builtin.shell: >
     /usr/bin/postgresql-{{ postgresql_version }}-setup initdb
   become: true
@@ -78,7 +78,7 @@
   when: not postgresql_data.stat.exists
   changed_when: false
 
-- name: Ensure PostgreSQL service is running
+- name: "RHEL | Ensure PostgreSQL service is running"
   ansible.builtin.service:
     name: postgresql-{{ postgresql_version }}
     state: started

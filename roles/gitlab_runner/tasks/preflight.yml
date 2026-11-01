@@ -1,0 +1,265 @@
+---
+# Everything here runs before a single package is installed, and nothing here
+# changes the host.
+
+- name: "ALL | Ensure the operating system and the architecture are ones this role supports"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] in gitlab_runner_supported_os_families
+      - ansible_facts['distribution'] in gitlab_runner_supported_distributions
+      - ansible_facts['architecture'] in gitlab_runner_supported_architectures
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} on
+      {{ ansible_facts['architecture'] }}. This role installs GitLab Runner on
+      {{ gitlab_runner_supported_distributions | join(' or ') }}
+      ({{ gitlab_runner_supported_architectures | join(' or ') }}) only.
+    quiet: true
+
+- name: "DEBIAN | Ensure the Ubuntu release has runner and Docker packages published for it"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_repository_suite in gitlab_runner_supported_ubuntu_releases
+    fail_msg: >-
+      There is no GitLab Runner repository for Ubuntu
+      '{{ gitlab_runner_repository_suite }}'. Packages are published for
+      {{ gitlab_runner_supported_ubuntu_releases | join(', ') }}. On a newer
+      Ubuntu than GitLab has caught up with, point
+      gitlab_runner_repository_suite at the most recent supported codename
+      deliberately.
+    quiet: true
+
+- name: "ALL | Measure the free space on the filesystems a runner fills"
+  # df needs a path that exists, and neither of these does before the
+  # packages are installed — so walk up to the nearest existing parent, which
+  # is on the same filesystem the directory will be created on.
+  #
+  # No pipe: /bin/sh is dash on Ubuntu, and older dash has no pipefail, so a
+  # pipe here would hide a failing df behind the exit code of the next command.
+  ansible.builtin.shell:
+    cmd: |
+      path={{ item | quote }}
+      while [ ! -d "$path" ]; do path=$(dirname "$path"); done
+      df --block-size=1M --output=avail,target "$path"
+  register: gitlab_runner_preflight_disk
+  changed_when: false
+  check_mode: false
+  loop: "{{ gitlab_runner_preflight_disk_paths }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: "ALL | Ensure this host has the CPU and memory a runner needs"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['processor_vcpus'] | int >= gitlab_runner_preflight_min_cpu | int
+      - ansible_facts['memtotal_mb'] | int >= gitlab_runner_preflight_min_memory_mb | int
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ ansible_facts['processor_vcpus'] }} vCPU
+      and {{ ansible_facts['memtotal_mb'] }} MB RAM. The minimum is
+      {{ gitlab_runner_preflight_min_cpu }} vCPU and
+      {{ gitlab_runner_preflight_min_memory_mb }} MB. That is a floor rather
+      than a recommendation: a runner's appetite is its jobs', and
+      gitlab_runner_concurrent decides how many run at once.
+    quiet: true
+
+- name: "ALL | Ensure every filesystem a runner fills has enough free space"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_preflight_disk_line | split() | first | int >= gitlab_runner_preflight_min_disk_free_mb | int
+    fail_msg: >-
+      {{ item.item }} lives on {{ gitlab_runner_preflight_disk_line | split() | last }},
+      which has {{ gitlab_runner_preflight_disk_line | split() | first }} MB
+      free. {{ gitlab_runner_preflight_min_disk_free_mb }} MB is required:
+      images, layers and build caches all accumulate under /var/lib/docker,
+      quietly, until a job fails with no space left on device.
+    quiet: true
+  vars:
+    # The header is the first line; the filesystem holding the path is the last.
+    gitlab_runner_preflight_disk_line: "{{ item.stdout_lines | last }}"
+  loop: "{{ gitlab_runner_preflight_disk.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# What is already here decides two of the checks below: whether the docker
+# executor has an engine to talk to, and whether this host needs a token at
+# all or is already registered.
+- name: "ALL | Check whether this host already has a Docker socket"
+  ansible.builtin.stat:
+    path: "{{ gitlab_runner_docker_socket }}"
+  become: true
+  register: gitlab_runner_docker_socket_state
+
+- name: "ALL | Check whether this host already has a runner configuration"
+  ansible.builtin.stat:
+    path: "{{ gitlab_runner_config_file }}"
+  become: true
+  register: gitlab_runner_config_preexisting
+
+- name: "ALL | Ensure the GitLab this runner attaches to is named"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_url_scheme in ['http', 'https']
+      - gitlab_runner_url_host | length > 0
+    fail_msg: >-
+      gitlab_runner_url is '{{ gitlab_runner_url }}'. It has to be the base
+      URL of the GitLab instance this runner belongs to, for example
+      'https://gitlab.example.com' — the same URL you open in a browser, with
+      no /api/v4 and no trailing path.
+    quiet: true
+
+- name: "ALL | Ensure the executor is one this role implements"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_executor in gitlab_runner_supported_executors
+    fail_msg: >-
+      gitlab_runner_executor is '{{ gitlab_runner_executor }}'. This role
+      configures {{ gitlab_runner_supported_executors | join(' or ') }}.
+    quiet: true
+
+- name: "ALL | Ensure the docker executor has an engine to talk to"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_docker_engine_install | bool or gitlab_runner_docker_socket_state.stat.exists
+    fail_msg: >-
+      gitlab_runner_executor is 'docker' but gitlab_runner_docker_engine_install
+      is false and there is no Docker socket at
+      {{ gitlab_runner_docker_socket }}. Every job would fail at startup. Let
+      the role install Docker, or point the executor at a daemon yourself
+      through gitlab_runner_docker_extra_configuration (host = "tcp://...").
+    quiet: true
+  when: gitlab_runner_executor == 'docker'
+
+- name: "ALL | Ensure the runner knows what it is attaching to"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_scope in gitlab_runner_supported_scopes
+      - not (gitlab_runner_scope == 'group' and gitlab_runner_group | string | length == 0)
+      - not (gitlab_runner_scope == 'project' and gitlab_runner_project | string | length == 0)
+    fail_msg: >-
+      gitlab_runner_scope is '{{ gitlab_runner_scope }}'. It has to be one of
+      {{ gitlab_runner_supported_scopes | join(', ') }}, and a group or project
+      scope needs gitlab_runner_group or gitlab_runner_project set — a numeric
+      ID, or a full path like 'platform/infra'.
+    quiet: true
+
+# create_runner grants exactly one thing: creating runners. Resolving a group
+# or project *path* is an API read, which it does not cover — so a token with
+# only that scope has to name the target by its numeric ID.
+- name: "ALL | Report what the access token will have to be allowed to do"
+  ansible.builtin.debug:
+    msg: >-
+      '{{ gitlab_runner_scope_target | trim }}' is a path, so this run reads
+      it from GitLab's API before creating the runner: the access token needs
+      read_api as well as create_runner. A token with only create_runner works
+      if you name the {{ gitlab_runner_scope }} by its numeric ID instead —
+      GitLab shows it on the {{ gitlab_runner_scope }}'s overview page.
+  when:
+    - gitlab_runner_api_token | length > 0
+    - gitlab_runner_scope in ['group', 'project']
+    - not gitlab_runner_scope_target_is_id | bool
+
+- name: "ALL | Ensure there is a way to get an authentication token"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_authentication_token | length > 0
+        or gitlab_runner_api_token | length > 0
+        or gitlab_runner_config_preexisting.stat.exists
+    fail_msg: >-
+      This runner has no way to authenticate. Set
+      gitlab_runner_authentication_token to a 'glrt-' token from a runner you
+      created in GitLab's UI, or gitlab_runner_api_token to a personal or
+      group access token with the create_runner scope so the role can create
+      the runner itself. GitLab removed registration tokens, so there is
+      nothing to read off a group or project.
+    quiet: true
+
+# Both are called "token" and one of them is what GitLab shows you when you
+# create a runner in the UI, so this swap is easy to make and impossible to
+# diagnose from the 401 it produces.
+- name: "ALL | Ensure the access token is not a runner token in disguise"
+  ansible.builtin.assert:
+    that:
+      - not gitlab_runner_api_token is match('^glrt-')
+    fail_msg: >-
+      gitlab_runner_api_token starts with 'glrt-', which makes it a runner
+      authentication token rather than an access token — it cannot call
+      GitLab's API, and GitLab answers 401. If you created the runner in
+      GitLab's UI, that token belongs in
+      gitlab_runner_authentication_token instead, and then the role needs no
+      API access at all. If you want the role to create the runner, use a
+      personal or group access token ('glpat-') with the create_runner scope.
+    quiet: true
+  when: gitlab_runner_api_token | length > 0
+
+# A placeholder gets through every check that only asks whether a token is
+# set, and then costs a full run — Docker, the runner, a fetched certificate —
+# before GitLab answers 401. Cheaper to say so now.
+- name: "ALL | Ensure the access token is a real one rather than a placeholder"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_api_token not in gitlab_runner_api_token_placeholders
+      - gitlab_runner_api_token | length >= 20
+    fail_msg: >-
+      gitlab_runner_api_token is still a placeholder, or too short to be a
+      GitLab token (they are around 26 characters). Create one in GitLab —
+      your avatar > Edit profile > Access tokens, scope create_runner — and
+      keep it in Ansible Vault:
+      `ansible-vault encrypt_string --name vault_gitlab_create_runner_token '<value>'`.
+      Nothing is installed on this host until it is set.
+    quiet: true
+  vars:
+    gitlab_runner_api_token_placeholders:
+      - "ChangeMe"
+      - "ChangeMe123!"
+      - "changeme"
+      - "glpat-xxxxxxxxxxxxxxxxxxxx"
+  when: gitlab_runner_api_token | length > 0
+
+- name: "ALL | Ensure a supplied authentication token is the right kind of token"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_authentication_token is match('^glrt-')
+    fail_msg: >-
+      gitlab_runner_authentication_token does not start with 'glrt-', so it is
+      probably a registration token (those began with 'GR'). Registration
+      tokens no longer work: create the runner first — in the UI, or by giving
+      the role a gitlab_runner_api_token — and use the token that gives you.
+    quiet: true
+  when: gitlab_runner_authentication_token | length > 0
+
+- name: "ALL | Ensure the certificate to trust comes from one source only"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_ca_certificate_src | length == 0
+        or gitlab_runner_ca_certificate_content | length == 0
+    fail_msg: >-
+      gitlab_runner_ca_certificate_src and
+      gitlab_runner_ca_certificate_content are both set, and they are two ways
+      to install the same file. Pick one.
+    quiet: true
+
+# A block with a rescue rather than wait_for with failed_when: false and an
+# assert: failed_when overwrites the module's own `failed` field, so an assert
+# on it can never fire — the check would look like coverage while proving
+# nothing.
+- name: "ALL | Check that this host can reach GitLab"
+  when: gitlab_runner_preflight_check_url_reachable | bool
+  block:
+    - name: "ALL | Dial GitLab's web port from this host"
+      ansible.builtin.wait_for:
+        host: "{{ gitlab_runner_url_host }}"
+        port: "{{ gitlab_runner_url_port | int }}"
+        timeout: 20
+      changed_when: false
+      check_mode: false
+
+  rescue:
+    - name: "ALL | Report that GitLab cannot be reached from this host"
+      ansible.builtin.fail:
+        msg: >-
+          {{ gitlab_runner_url_host }}:{{ gitlab_runner_url_port | trim }} is
+          not reachable from {{ inventory_hostname }}, and a runner that
+          cannot reach GitLab registers nothing and takes no jobs. Check DNS
+          for that name, the route, and the firewall on the GitLab host — its
+          web port has to be open to this one — before going further. Set
+          gitlab_runner_preflight_check_url_reachable to false to skip this.

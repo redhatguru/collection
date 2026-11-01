@@ -1,0 +1,26 @@
+---
+# Upgrades a running GitLab to the release pinned in gitlab_version.
+#
+#   ansible-playbook playbooks/gitlab-upgrade.yml \
+#     -e gitlab_version=19.5.0-ce.0 -e gitlab_upgrade_enabled=true
+#
+# The role backs the instance up first, refuses a downgrade and refuses a jump
+# that skips a stop on GitLab's upgrade path, then reconfigures, restarts and
+# verifies that the release now serving requests is the one that was asked
+# for. GitLab is unavailable from the moment the package is replaced until the
+# migrations have finished.
+#
+# serial: 1 matters as soon as the group holds more than one instance: each
+# one is upgraded and verified before the next is touched, so a release that
+# breaks on your data stops the run at the first instance instead of all of
+# them.
+- name: Upgrade GitLab one instance at a time
+  hosts: gitlab_servers
+  serial: 1
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Upgrade this GitLab instance"
+      ansible.builtin.include_role:
+        name: redhatguru.general.gitlab
+        tasks_from: upgrade.yml

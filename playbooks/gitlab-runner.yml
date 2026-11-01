@@ -1,0 +1,26 @@
+---
+# Installs GitLab Runner and the Docker engine on the hosts in the
+# gitlab_runners group, and registers each one with GitLab.
+#
+# One runner per host. Several hosts in the group means several runners, each
+# created separately in GitLab — which is what you want: capacity comes from
+# more hosts, and gitlab_runner_concurrent decides how much of it one host
+# offers.
+#
+# The runner's authentication token comes from GitLab's API, so the run needs
+# gitlab_runner_api_token: a personal or group access token with the
+# create_runner scope. Keep it in Ansible Vault, or pass it for one run:
+#
+#   ansible-playbook playbooks/gitlab-runner.yml -e gitlab_runner_api_token=glpat-...
+#
+# A host that is already registered keeps the token it has, so re-running this
+# play never creates a second runner for it.
+#
+# become is set per task inside the role rather than for the whole play, so
+# the tasks that do not need root do not get it.
+- name: Install and register GitLab Runner
+  hosts: gitlab_runners
+  gather_facts: true
+
+  roles:
+    - role: redhatguru.general.gitlab_runner

@@ -1,12 +1,12 @@
 ---
-- name: Ensure EPEL is enabled
+- name: "RHEL | Ensure EPEL is enabled"
   ansible.builtin.package:
     name: epel-release
     state: present
   become: true
   when: ansible_facts['os_family'] == 'RedHat'
 
-- name: Ensure the Python kubernetes client is installed
+- name: "ALL | Ensure the Python kubernetes client is installed"
   ansible.builtin.package:
     name:
       - python3-kubernetes
@@ -27,7 +27,7 @@
     update_cache: true
   become: true
 
-- name: Ensure git is installed
+- name: "ALL | Ensure git is installed"
   # operator.yml's kustomization references a remote GitHub base
   # (github.com/ansible/awx-operator/config/default?ref=...), which
   # "kubectl apply -k" fetches via git — it fails outright without it.

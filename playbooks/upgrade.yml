@@ -1,0 +1,33 @@
+---
+# Rolling upgrade of a running cluster. Set k3s_version to the
+# release you want and k3s_upgrade_enabled to true, then run this
+# playbook — it never runs as part of site.yml.
+#
+# serial: 1 is the point of this playbook: one node is drained, upgraded and
+# brought back to Ready before the next one is touched. Upgrading several
+# control-plane nodes at once loses the etcd quorum, so the role asserts that
+# the batch really is one host.
+#
+# The control plane is a separate play from the workers, so it is always fully
+# upgraded first.
+- name: Upgrade the control-plane nodes one at a time
+  hosts: k8s_control_plane
+  serial: 1
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Upgrade this control-plane node"
+      ansible.builtin.include_role:
+        name: redhatguru.general.k3s
+        tasks_from: upgrade.yml
+
+- name: Upgrade the worker nodes one at a time
+  hosts: k8s_workers
+  serial: 1
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Upgrade this worker node"
+      ansible.builtin.include_role:
+        name: redhatguru.general.k3s
+        tasks_from: upgrade.yml

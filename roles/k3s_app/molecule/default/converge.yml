@@ -1,0 +1,158 @@
+---
+# The cluster itself is built by the infrastructure role's shared converge
+# playbook — one place knows how to turn Vagrant VMs into a cluster — so this
+# scenario only has to describe the applications.
+
+- name: Build the cluster the applications land on
+  ansible.builtin.import_playbook: ../../../k3s/molecule/resources/converge-cluster.yml
+
+- name: Deploy the applications
+  hosts: all
+
+  vars:
+    k3s_app_applications:
+      # A Deployment that uses every optional part of the model at once:
+      # ConfigMap, Secret, environment from a Secret, volumes, probes, an
+      # Ingress, and a custom NetworkPolicy on top of the generated ones.
+      - name: web
+        namespace: app-web
+        enabled: true
+        kind: Deployment
+        replicas: 2
+
+        image:
+          repository: nginxinc/nginx-unprivileged
+          tag: "1.27-alpine"
+
+        ports:
+          - name: http
+            container_port: 8080
+
+        service:
+          type: ClusterIP
+          port: 80
+          target_port: http
+
+        ingress:
+          enabled: true
+          host: web.example.local
+          tls: false
+
+        config_maps:
+          - name: web-content
+            data:
+              index.html: |
+                <html><body>molecule web</body></html>
+
+        secrets:
+          - name: web-credentials
+            string_data:
+              api_token: "molecule-not-a-real-token"
+
+        env:
+          - name: API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: web-credentials
+                key: api_token
+
+        volumes:
+          - name: cache
+            emptyDir: {}
+          - name: run
+            emptyDir: {}
+          - name: content
+            configMap:
+              name: web-content
+        volume_mounts:
+          - name: cache
+            mountPath: /var/cache/nginx
+          - name: run
+            mountPath: /tmp
+          - name: content
+            mountPath: /usr/share/nginx/html
+
+        readiness_probe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 3
+
+        network_policy:
+          enabled: true
+          extra:
+            - name: allow-from-web
+              spec:
+                podSelector: {}
+                policyTypes:
+                  - Egress
+                egress:
+                  - to:
+                      - namespaceSelector:
+                          matchLabels:
+                            kubernetes.io/metadata.name: app-store
+
+      # A StatefulSet with a volume claim template, on the local-path
+      # provisioner K3s ships with.
+      - name: store
+        namespace: app-store
+        enabled: true
+        kind: StatefulSet
+        replicas: 1
+
+        image:
+          repository: nginxinc/nginx-unprivileged
+          tag: "1.27-alpine"
+
+        ports:
+          - name: http
+            container_port: 8080
+
+        service:
+          type: ClusterIP
+          port: 80
+          target_port: http
+
+        volume_claim_templates:
+          - name: data
+            size: 1Gi
+            access_modes:
+              - ReadWriteOnce
+
+        volumes:
+          - name: cache
+            emptyDir: {}
+          - name: run
+            emptyDir: {}
+        volume_mounts:
+          - name: cache
+            mountPath: /var/cache/nginx
+          - name: run
+            mountPath: /tmp
+          - name: data
+            mountPath: /data
+
+        readiness_probe:
+          httpGet:
+            path: /
+            port: http
+          initialDelaySeconds: 3
+
+        network_policy:
+          enabled: true
+
+      # Disabled, to prove an application can be switched off without being
+      # silently deleted.
+      - name: never-deployed
+        namespace: app-never
+        enabled: false
+        image:
+          repository: nginxinc/nginx-unprivileged
+          tag: "1.27-alpine"
+        service:
+          port: 80
+
+  tasks:
+    - name: Include the k3s_app role
+      ansible.builtin.include_role:
+        name: k3s_app

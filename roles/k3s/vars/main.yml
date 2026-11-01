@@ -1,2 +1,325 @@
 ---
 # vars file for k3s
+#
+# Values the role derives rather than accepts. These sit in vars/ on purpose:
+# overriding a derived topology from inventory would let the asserts in
+# preflight.yml pass while the cluster is built from different facts.
+
+# --------------------------------------------------------------------------
+# Supported platforms
+# --------------------------------------------------------------------------
+
+k3s_supported_os_families:
+  - Debian
+  - RedHat
+
+k3s_supported_architectures:
+  - x86_64
+  - aarch64
+
+# Ansible's architecture fact to the names used in K3s and Helm release files.
+k3s_architecture_map:
+  x86_64: amd64
+  aarch64: arm64
+
+k3s_release_architecture: "{{ k3s_architecture_map[ansible_facts['architecture']] | default('') }}"
+
+# The amd64 K3s binary is published as plain "k3s"; every other platform
+# carries its architecture as a suffix.
+k3s_binary_asset: >-
+  {{ 'k3s' if k3s_release_architecture == 'amd64' else 'k3s-' ~ k3s_release_architecture }}
+k3s_checksum_asset: "sha256sum-{{ k3s_release_architecture }}.txt"
+
+# --------------------------------------------------------------------------
+# Topology derived from the inventory
+# --------------------------------------------------------------------------
+
+k3s_control_plane_hosts: "{{ groups[k3s_control_plane_group] | default([]) }}"
+
+# A host in both groups counts as a control-plane node only, so the derived
+# worker list never double-counts it. preflight.yml rejects the overlap
+# unless it was explicitly allowed.
+k3s_worker_hosts: >-
+  {{ (groups[k3s_worker_group] | default([])) | difference(k3s_control_plane_hosts) }}
+
+k3s_overlapping_hosts: >-
+  {{ k3s_control_plane_hosts | intersect(groups[k3s_worker_group] | default([])) }}
+
+k3s_cluster_hosts: "{{ k3s_control_plane_hosts + k3s_worker_hosts }}"
+
+# single-node    : one control plane, no workers
+# single-server  : one control plane, dedicated workers
+# ha             : three or more control planes (embedded etcd quorum)
+k3s_topology: >-
+  {{ 'ha' if (k3s_control_plane_hosts | length) >= 3
+     else ('single-server' if (k3s_worker_hosts | length) > 0 else 'single-node') }}
+
+k3s_node_role: >-
+  {{ 'control-plane' if inventory_hostname in k3s_control_plane_hosts else 'worker' }}
+
+k3s_is_init_host: "{{ inventory_hostname == k3s_init_host }}"
+
+# Nodes that can actually run add-on workloads, used to size Traefik.
+k3s_schedulable_node_count: >-
+  {{ (k3s_worker_hosts | length)
+     if (k3s_taint_control_plane | bool and (k3s_worker_hosts | length) > 0)
+     else (k3s_cluster_hosts | length) }}
+
+k3s_traefik_replica_count: >-
+  {{ k3s_traefik_replicas
+     if (k3s_traefik_replicas | string | length) > 0
+     else [k3s_schedulable_node_count | int, k3s_traefik_max_replicas | int] | min }}
+
+# Addresses of every cluster node, as host routes, for the firewall rules
+# that only cluster members need to pass.
+k3s_cluster_node_addresses: >-
+  {{ k3s_cluster_hosts
+     | map('extract', hostvars, 'k3s_node_ip')
+     | reject('equalto', '')
+     | map('regex_replace', '^(.*)$', '\1/32')
+     | list }}
+
+# --------------------------------------------------------------------------
+# Paths
+# --------------------------------------------------------------------------
+
+k3s_config_file: "{{ k3s_config_dir }}/config.yaml"
+k3s_server_dir: "{{ k3s_data_dir }}/server"
+k3s_manifests_dir: "{{ k3s_data_dir }}/server/manifests"
+k3s_kubeconfig: "{{ k3s_config_dir }}/k3s.yaml"
+k3s_audit_policy_file: "{{ k3s_server_dir }}/audit-policy.yaml"
+k3s_audit_log_dir: "{{ k3s_server_dir }}/logs"
+k3s_audit_log_file: "{{ k3s_server_dir }}/logs/audit.log"
+k3s_admission_config_file: "{{ k3s_server_dir }}/admission-control-config.yaml"
+k3s_binary: "{{ k3s_bin_dir }}/k3s"
+k3s_kubectl: "{{ k3s_bin_dir }}/k3s kubectl"
+k3s_helm_binary: "{{ k3s_helm_bin_dir }}/helm"
+
+k3s_service_name: "{{ 'k3s' if k3s_node_role == 'control-plane' else 'k3s-agent' }}"
+
+# --------------------------------------------------------------------------
+# Bundled K3s components to switch off
+# --------------------------------------------------------------------------
+
+# The packaged Traefik is always disabled: K3s deploys it through its own
+# HelmChart addon, which cannot be version-pinned or spread across nodes the
+# way the upstream chart can. This role installs Traefik with Helm instead.
+k3s_disabled_components: >-
+  {{ ['traefik']
+     + ([] if k3s_servicelb_enabled | bool else ['servicelb'])
+     + ([] if k3s_metrics_server_enabled | bool else ['metrics-server'])
+     + ([] if k3s_storage_local_path_enabled | bool else ['local-storage'])
+     + k3s_disable_extra }}
+
+# --------------------------------------------------------------------------
+# Firewall port matrix
+# --------------------------------------------------------------------------
+#
+# TCP, cluster-internal (restricted to the cluster node addresses):
+#   6443       Kubernetes API / K3s supervisor          control plane only
+#   2379/2380  etcd client / peer                       control plane, etcd only
+#   2381       etcd metrics (used by the health checks) control plane, etcd only
+#   10250      kubelet API — metrics and exec/logs      every node
+#   10256      kube-proxy health endpoint               every node
+#   7946       MetalLB speaker memberlist               every node, MetalLB only
+#
+# UDP, cluster-internal:
+#   8472       Flannel VXLAN overlay                    flannel-backend vxlan
+#   51820/1    Flannel WireGuard overlay                flannel-backend wireguard-native
+#   7946       MetalLB speaker memberlist               every node, MetalLB only
+#
+# Open wider than the cluster:
+#   22         SSH                      k3s_firewall_ssh_sources
+#   6443       API for kubectl users    k3s_firewall_api_sources
+#   80/443     Traefik ingress          k3s_firewall_ingress_sources
+#   30000+     NodePorts                opt-in, off by default
+
+k3s_firewall_cluster_tcp_ports: >-
+  {{ ['10250', '10256']
+     + (['6443'] if k3s_node_role == 'control-plane' else [])
+     + (['2379', '2380', '2381']
+        if (k3s_node_role == 'control-plane' and k3s_cluster_init | bool) else [])
+     + (['7946'] if k3s_metallb_enabled | bool else []) }}
+
+k3s_firewall_cluster_udp_ports: >-
+  {{ (['8472'] if k3s_flannel_backend == 'vxlan' else [])
+     + (['51820', '51821'] if k3s_flannel_backend == 'wireguard-native' else [])
+     + (['7946'] if k3s_metallb_enabled | bool else []) }}
+
+# Pod and service traffic is allowed by trusting the CIDRs it comes from,
+# which is what keeps the firewall enabled instead of switched off. Node-to-node
+# control traffic is not covered by this — it gets explicit per-port rules, so
+# that trusting a peer node does not mean trusting every port on it.
+k3s_firewall_trusted_networks: >-
+  {{ [k3s_cluster_cidr, k3s_service_cidr]
+     + k3s_firewall_cluster_sources_extra }}
+
+k3s_firewall_node_sources: "{{ k3s_cluster_node_addresses }}"
+
+# CNI interfaces whose traffic bypasses the host firewall entirely.
+k3s_firewall_trusted_interfaces: >-
+  {{ ['cni0']
+     + (['flannel.1'] if k3s_flannel_backend == 'vxlan' else [])
+     + (['flannel-wg'] if k3s_flannel_backend == 'wireguard-native' else []) }}
+
+# --------------------------------------------------------------------------
+# Default API server audit policy
+# --------------------------------------------------------------------------
+#
+# Used when k3s_audit_policy_rules is left empty. Secrets and
+# ConfigMaps are logged at Metadata only and never at Request/RequestResponse:
+# the request body of a Secret write is the secret.
+k3s_audit_policy_default_rules:
+  - level: None
+    resources:
+      - group: ""
+        resources:
+          - events
+  - level: None
+    users:
+      - system:kube-proxy
+    verbs:
+      - watch
+      - list
+      - get
+  - level: None
+    userGroups:
+      - system:nodes
+    verbs:
+      - get
+      - watch
+      - list
+  - level: Metadata
+    resources:
+      - group: ""
+        resources:
+          - secrets
+          - configmaps
+          - serviceaccounts/token
+      - group: authentication.k8s.io
+        resources:
+          - tokenreviews
+  - level: RequestResponse
+    resources:
+      - group: rbac.authorization.k8s.io
+        resources:
+          - clusterroles
+          - clusterrolebindings
+          - roles
+          - rolebindings
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources:
+          - pods/exec
+          - pods/attach
+          - pods/portforward
+  - level: None
+    verbs:
+      - get
+      - list
+      - watch
+  - level: Metadata
+
+# --------------------------------------------------------------------------
+# Values rendered into /etc/rancher/k3s/config.yaml
+# --------------------------------------------------------------------------
+
+# Every name and address the API server certificate has to be valid for: each
+# control-plane node by name and by address, plus the registration endpoint
+# the other nodes and kubectl actually connect to.
+k3s_tls_sans: >-
+  {{ (k3s_control_plane_hosts | map('extract', hostvars, 'k3s_node_name') | list
+      + k3s_control_plane_hosts | map('extract', hostvars, 'k3s_node_ip') | list
+      + [k3s_api_registration_address]
+      + k3s_api_extra_tls_san)
+     | reject('equalto', '') | unique | list }}
+
+k3s_audit_policy_effective_rules: >-
+  {{ k3s_audit_policy_rules
+     if k3s_audit_policy_rules | length > 0
+     else k3s_audit_policy_default_rules }}
+
+k3s_audit_args: >-
+  {{ ['audit-log-path=' ~ k3s_audit_log_file,
+      'audit-log-maxage=' ~ (k3s_audit_log_max_age | string),
+      'audit-log-maxbackup=' ~ (k3s_audit_log_max_backup | string),
+      'audit-log-maxsize=' ~ (k3s_audit_log_max_size | string),
+      'audit-policy-file=' ~ k3s_audit_policy_file]
+     if (k3s_hardening_enabled | bool and k3s_api_audit_enabled | bool) else [] }}
+
+k3s_admission_args: >-
+  {{ ['admission-control-config-file=' ~ k3s_admission_config_file]
+     if (k3s_hardening_enabled | bool and k3s_pod_security_enabled | bool) else [] }}
+
+k3s_apiserver_args: >-
+  {{ k3s_audit_args + k3s_admission_args + k3s_extra_apiserver_args }}
+
+# MetalLB's speaker runs with hostNetwork and NET_RAW so it can answer ARP for
+# the service addresses — both of which the "baseline" Pod Security Standard
+# forbids. Exempting its namespace in the admission configuration keeps the
+# exception explicit and auditable in one place, instead of labelling the
+# namespace privileged where nobody will look for it.
+k3s_pod_security_exempt_effective_namespaces: >-
+  {{ (k3s_pod_security_exempt_namespaces
+      + ([k3s_metallb_namespace] if k3s_metallb_enabled | bool else []))
+     | unique | list }}
+
+# Home directory of k3s_kubeconfig_user, from the passwd database, and
+# the kubeconfig K3s generated with its loopback server URL replaced by an
+# address that the API server certificate actually covers.
+k3s_kubeconfig_home: >-
+  {{ (ansible_facts['getent_passwd'] | default({}))
+     .get(k3s_kubeconfig_user, ['', '', '', '', '', ''])[4] }}
+
+k3s_kubeconfig_rewritten: >-
+  {{ (k3s_kubeconfig_generated.content | default('') | b64decode)
+     | regex_replace('https://127\.0\.0\.1:' ~ (k3s_api_port | string),
+                     'https://' ~ k3s_api_registration_address ~ ':' ~ (k3s_api_port | string)) }}
+
+# --------------------------------------------------------------------------
+# Paths tightened by tasks/hardening-files.yml
+# --------------------------------------------------------------------------
+#
+# Anything that holds a credential, a private key or the datastore. Each path
+# is checked before it is changed, so the same list works on a control-plane
+# node and on a worker, where most of it does not exist.
+k3s_hardening_restricted_dirs:
+  - "{{ k3s_config_dir }}"
+  - "{{ k3s_data_dir }}"
+  - "{{ k3s_server_dir }}"
+  - "{{ k3s_server_dir }}/cred"
+  - "{{ k3s_server_dir }}/tls"
+  - "{{ k3s_server_dir }}/db"
+  - "{{ k3s_data_dir }}/agent"
+
+k3s_hardening_restricted_files:
+  - "{{ k3s_config_file }}"
+  - "{{ k3s_token_file }}"
+  - "{{ k3s_kubeconfig }}"
+  - "{{ k3s_server_dir }}/token"
+  - /etc/rancher/node/password
+
+# Helm release archive name for this platform.
+k3s_helm_archive: "helm-{{ k3s_helm_release | default('') }}-linux-{{ k3s_release_architecture }}.tar.gz"
+
+# --------------------------------------------------------------------------
+# Workloads tasks/validate.yml expects to find healthy
+# --------------------------------------------------------------------------
+
+k3s_validate_deployments: >-
+  {{ [{'namespace': 'kube-system', 'name': 'coredns'}]
+     + ([{'namespace': 'kube-system', 'name': 'metrics-server'}]
+        if k3s_metrics_server_enabled | bool else [])
+     + ([{'namespace': k3s_traefik_namespace, 'name': 'traefik'}]
+        if k3s_traefik_enabled | bool else [])
+     + ([{'namespace': k3s_metallb_namespace, 'name': 'metallb-controller'}]
+        if k3s_metallb_enabled | bool else [])
+     + ([{'namespace': k3s_cert_manager_namespace, 'name': 'cert-manager'},
+         {'namespace': k3s_cert_manager_namespace, 'name': 'cert-manager-webhook'},
+         {'namespace': k3s_cert_manager_namespace, 'name': 'cert-manager-cainjector'}]
+        if k3s_cert_manager_enabled | bool else []) }}
+
+k3s_validate_daemonsets: >-
+  {{ [{'namespace': k3s_metallb_namespace, 'name': 'metallb-speaker'}]
+     if k3s_metallb_enabled | bool else [] }}

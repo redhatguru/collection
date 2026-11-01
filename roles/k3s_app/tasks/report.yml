@@ -1,0 +1,42 @@
+---
+- name: "ALL | Print the application report"
+  ansible.builtin.debug:
+    msg:
+      - "State          : {{ k3s_app_state }}"
+      - "Applications   : {{ k3s_app_enabled_applications | map(attribute='name') | join(', ') | default('none', true) }}"
+      - "Helm releases  : {{ k3s_app_helm_releases | map(attribute='name') | join(', ') | default('none', true) }}"
+      - "Raw manifests  : {{ k3s_app_manifests | length }}"
+      - "Ingress class  : {{ k3s_app_ingress_class }}"
+      - "Pod security   : {{ k3s_app_pod_security_level }}"
+      - "Hostnames      : {{ k3s_app_ingress_hosts | join(', ') | default('none', true) }}"
+  vars:
+    k3s_app_ingress_hosts: >-
+      {{ k3s_app_enabled_applications | selectattr('ingress', 'defined')
+         | map(attribute='ingress') | selectattr('enabled', 'defined') | selectattr('enabled')
+         | map(attribute='host') | list }}
+
+- name: "ALL | Collect the state of the deployed applications for the debug report"
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: "{{ item.kind | default('Deployment') }}"
+    name: "{{ item.name }}"
+    namespace: "{{ item.namespace }}"
+    kubeconfig: "{{ k3s_app_kubeconfig }}"
+  become: true
+  register: k3s_app_state_info
+  loop: "{{ k3s_app_enabled_applications }}"
+  loop_control:
+    label: "{{ item.namespace }}/{{ item.name }}"
+  when: k3s_app_debug | bool
+
+- name: "ALL | Print the replica status of each deployed application"
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.namespace }}/{{ item.item.name }}:
+      {{ item.resources[0].status.readyReplicas | default(0) }}/{{ item.resources[0].spec.replicas | default(0) }} ready
+  loop: "{{ k3s_app_state_info.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.namespace }}/{{ item.item.name }}"
+  when:
+    - k3s_app_debug | bool
+    - item.resources | default([]) | length > 0

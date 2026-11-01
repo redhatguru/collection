@@ -1,0 +1,5 @@
+---
+k3s_test_subnet_prefix: "10.10.23"
+
+# A worker runs no etcd and no API server, so it needs less memory.
+k3s_preflight_min_memory_mb: 900

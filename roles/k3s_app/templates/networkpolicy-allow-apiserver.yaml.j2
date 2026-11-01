@@ -1,0 +1,24 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# Only generated for an application that asked for it. The API server has no
+# pod labels to select on, so the rule has to name the service CIDR its
+# ClusterIP comes out of.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ k3s_app_item.name }}-allow-apiserver"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/managed-by: ansible
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: "{{ k3s_app_api_server_cidr }}"
+      ports:
+        - protocol: TCP
+          port: {{ k3s_app_api_server_port | int }}

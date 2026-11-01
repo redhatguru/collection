@@ -1,8 +1,35 @@
 ---
 galaxy_info:
-  author: Guido Martens
-  description: Install and deploy K3s
-  license: Guido Martens
-  min_ansible_version: "2.1"
-  galaxy_tags: []
+  role_name: k3s
+  namespace: redhatguru
+  author: redhatguru
+  description: >-
+    Installs, configures and hardens a K3s Kubernetes cluster — single node,
+    single control plane with workers, or an HA embedded-etcd control plane —
+    with the topology derived entirely from the Ansible inventory. Includes OS
+    preparation, a node-role aware host firewall that stays enabled, CIS-style
+    cluster hardening, MetalLB, Traefik, cert-manager, etcd snapshots and a
+    controlled rolling upgrade path.
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - kubernetes
+    - k3s
+    - cluster
+    - containers
+    - traefik
+    - metallb
+    - certmanager
+    - hardening
+    - security
+
 dependencies: []

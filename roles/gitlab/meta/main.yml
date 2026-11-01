@@ -1,0 +1,31 @@
+---
+galaxy_info:
+  role_name: gitlab
+  namespace: redhatguru
+  author: redhatguru
+  description: >-
+    Installs and configures a single-node GitLab (Omnibus) on Ubuntu, with the
+    whole of /etc/gitlab/gitlab.rb rendered from role variables. Checks the
+    host against GitLab's hardware requirements before it installs anything,
+    schedules both halves of a restorable backup (data and secrets), verifies
+    the instance after every run, and provides a guarded upgrade path that
+    backs the instance up, refuses an unsupported version jump and proves the
+    new release is the one serving requests.
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+        - resolute
+  galaxy_tags:
+    - gitlab
+    - git
+    - devops
+    - scm
+    - omnibus
+    - backup
+    - upgrade
+
+dependencies: []

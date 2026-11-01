@@ -1,0 +1,87 @@
+---
+- name: Prepare
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for the instance to become truly reachable over SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        sleep: 5
+        timeout: 300
+
+    - name: Gather system info
+      ansible.builtin.raw: uname
+      register: gitlab_raw_uname
+      changed_when: false
+      failed_when: false
+
+    - name: Bootstrap python for Ansible
+      ansible.builtin.raw: |
+        command -v python3 python || (
+        command -v apk >/dev/null && sudo apk add --no-progress --update python3 ||
+        (test -e /usr/bin/dnf && sudo dnf install -y python3) ||
+        (test -e /usr/bin/apt && (apt -y update && apt install -y python3-minimal)) ||
+        (test -e /usr/bin/yum && sudo yum -y -qq install python3) ||
+        echo "Warning: Python not bootstrapped due to unknown platform."
+        )
+      become: true
+      changed_when: false
+      when: gitlab_raw_uname.rc == 0 and gitlab_raw_uname.stdout | trim == "Linux"
+
+    # The box ships without swap and the role's preflight checks require it —
+    # correctly, because GitLab's first reconfigure is where a host with no
+    # swap gets its Puma workers killed by the OOM reaper. Giving the test VM
+    # swap is the right fix; lowering the requirement would not be.
+    - name: Create the swap file GitLab's requirements ask for
+      ansible.builtin.command:
+        argv: [fallocate, -l, "2G", /swapfile]
+        creates: /swapfile
+      become: true
+
+    - name: Ensure the swap file is readable by root only
+      ansible.builtin.file:
+        path: /swapfile
+        owner: root
+        group: root
+        mode: "0600"
+      become: true
+
+    - name: Check whether the swap file is already in use
+      ansible.builtin.command:
+        argv: [swapon, --show=NAME, --noheadings]
+      register: gitlab_test_active_swap
+      changed_when: false
+
+    - name: Format the swap file
+      ansible.builtin.command:
+        argv: [mkswap, /swapfile]
+      become: true
+      changed_when: true
+      when: "'/swapfile' not in gitlab_test_active_swap.stdout"
+
+    - name: Ensure the swap file is activated at boot
+      ansible.posix.mount:
+        path: none
+        src: /swapfile
+        fstype: swap
+        opts: sw
+        state: present
+      become: true
+
+    - name: Activate the swap file for this boot
+      ansible.builtin.command:
+        argv: [swapon, --all]
+      become: true
+      changed_when: true
+      when: "'/swapfile' not in gitlab_test_active_swap.stdout"
+
+    # GitLab's external URL has to resolve on the host itself: the role's
+    # preflight checks it, and its own validation dials the loopback interface
+    # with this name in the Host header.
+    - name: Resolve the GitLab host name on the instance
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "127.0.0.1 gitlab.molecule.local"
+        regexp: " gitlab\\.molecule\\.local$"
+        state: present
+      become: true

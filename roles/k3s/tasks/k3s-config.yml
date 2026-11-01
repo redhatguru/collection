@@ -1,0 +1,160 @@
+---
+- name: "ALL | Resolve which K3s release this run installs"
+  ansible.builtin.include_tasks: resolve-k3s-release.yml
+
+- name: "ALL | Ensure the K3s configuration directory exists and is root-only"
+  ansible.builtin.file:
+    path: "{{ k3s_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+
+# The token is resolved in a fixed order of preference, and the file this role
+# manages is consulted before the one K3s writes. That matters for idempotency:
+# K3s stores the token in its long "K10<ca-hash>::server:<secret>" form, so
+# reading that back on every run would rewrite the token file — and restart the
+# cluster — each time.
+- name: "ALL | Check whether this role has already written a cluster token"
+  ansible.builtin.stat:
+    path: "{{ k3s_token_file }}"
+  become: true
+  register: k3s_managed_token
+  run_once: true
+  delegate_to: "{{ k3s_init_host }}"
+
+- name: "ALL | Check whether the cluster was already bootstrapped with a token"
+  ansible.builtin.stat:
+    path: "{{ k3s_server_dir }}/token"
+  become: true
+  register: k3s_bootstrapped_token
+  run_once: true
+  delegate_to: "{{ k3s_init_host }}"
+
+- name: "ALL | Read the cluster token this role wrote earlier"
+  ansible.builtin.slurp:
+    src: "{{ k3s_token_file }}"
+  become: true
+  register: k3s_managed_token_content
+  run_once: true
+  delegate_to: "{{ k3s_init_host }}"
+  no_log: true
+  when:
+    - k3s_token | length == 0
+    - k3s_managed_token.stat.exists
+
+- name: "ALL | Read the cluster token of the already-bootstrapped cluster"
+  ansible.builtin.slurp:
+    src: "{{ k3s_server_dir }}/token"
+  become: true
+  register: k3s_bootstrapped_token_content
+  run_once: true
+  delegate_to: "{{ k3s_init_host }}"
+  no_log: true
+  when:
+    - k3s_token | length == 0
+    - not k3s_managed_token.stat.exists
+    - k3s_bootstrapped_token.stat.exists
+
+- name: "ALL | Settle on the cluster token every node will use"
+  ansible.builtin.set_fact:
+    k3s_token_effective: >-
+      {{ k3s_token
+         if k3s_token | length > 0
+         else (k3s_managed_token_content.content | b64decode | trim
+               if k3s_managed_token.stat.exists
+               else (k3s_bootstrapped_token_content.content | b64decode | trim
+                     if k3s_bootstrapped_token.stat.exists
+                     else lookup('community.general.random_string', length=64, special=false))) }}
+  run_once: true
+  no_log: true
+
+- name: "ALL | Ensure the cluster token is on this node in a root-only file"
+  ansible.builtin.copy:
+    content: "{{ k3s_token_effective }}\n"
+    dest: "{{ k3s_token_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  no_log: true
+  notify: "restart k3s"
+
+- name: "ALL | Ensure the K3s server directory exists and is root-only"
+  ansible.builtin.file:
+    path: "{{ k3s_server_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: k3s_node_role == 'control-plane'
+
+# K3s applies anything dropped in here and keeps it reconciled, which is how
+# this role manages cluster objects that are not Helm releases (MetalLB pools,
+# StorageClasses, ClusterIssuers, NetworkPolicies) without needing a Python
+# Kubernetes client on the node.
+- name: "ALL | Ensure the K3s auto-deploying manifests directory exists"
+  ansible.builtin.file:
+    path: "{{ k3s_manifests_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: k3s_node_role == 'control-plane'
+
+- name: "ALL | Ensure the API server audit log directory exists and is root-only"
+  ansible.builtin.file:
+    path: "{{ k3s_audit_log_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when:
+    - k3s_node_role == 'control-plane'
+    - k3s_hardening_enabled | bool
+    - k3s_api_audit_enabled | bool
+
+# Both of these have to exist before K3s starts for the first time: the API
+# server refuses to come up when the audit policy or admission configuration
+# it is told to read is missing.
+- name: "ALL | Ensure the API server audit policy is in place"
+  ansible.builtin.template:
+    src: audit-policy.yaml.j2
+    dest: "{{ k3s_audit_policy_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  notify: "restart k3s"
+  when:
+    - k3s_node_role == 'control-plane'
+    - k3s_hardening_enabled | bool
+    - k3s_api_audit_enabled | bool
+
+- name: "ALL | Ensure the Pod Security Standards admission configuration is in place"
+  ansible.builtin.template:
+    src: admission-control-config.yaml.j2
+    dest: "{{ k3s_admission_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  notify: "restart k3s"
+  when:
+    - k3s_node_role == 'control-plane'
+    - k3s_hardening_enabled | bool
+    - k3s_pod_security_enabled | bool
+
+- name: "ALL | Ensure the K3s configuration matches this node's role in the cluster"
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ k3s_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  notify: "restart k3s"

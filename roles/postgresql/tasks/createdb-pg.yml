@@ -1,5 +1,5 @@
 ---
-- name: Create a PostgreSQL database
+- name: "ALL | Create a PostgreSQL database"
   community.general.postgresql_db:
     name: "{{ postgresql_database_name }}"
     state: present

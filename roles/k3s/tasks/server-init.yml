@@ -1,0 +1,27 @@
+---
+- name: "ALL | Start K3s on the bootstrap node"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    state: started
+  become: true
+
+- name: "ALL | Wait for the API server on the bootstrap node to accept connections"
+  ansible.builtin.wait_for:
+    host: "{{ k3s_node_ip }}"
+    port: "{{ k3s_api_port | int }}"
+    timeout: "{{ k3s_wait_timeout | int }}"
+
+- name: "ALL | Wait for the API server to report itself ready"
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", kubectl, get, --raw, /readyz]
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  register: k3s_api_readyz
+  changed_when: false
+  retries: "{{ (k3s_wait_timeout | int / 10) | round | int }}"
+  delay: 10
+  until: k3s_api_readyz.stdout | default('') == 'ok'
+
+- name: "ALL | Wait for the bootstrap node to be Ready"
+  ansible.builtin.include_tasks: wait-node-ready.yml

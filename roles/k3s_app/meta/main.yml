@@ -1,0 +1,33 @@
+---
+galaxy_info:
+  role_name: k3s_app
+  namespace: redhatguru
+  author: redhatguru
+  description: >-
+    Deploys applications onto an existing Kubernetes cluster from a declarative
+    inventory definition — namespace, workload, Service, Ingress, ConfigMaps,
+    Secrets, PVCs and NetworkPolicies — plus raw manifests and Helm releases.
+    Secure by default: restricted Pod Security Standards, no privilege
+    escalation, read-only root filesystem and a default-deny NetworkPolicy per
+    namespace. Knows nothing about how the cluster was built, so applications
+    can be added without touching the infrastructure role.
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - kubernetes
+    - k3s
+    - applications
+    - helm
+    - ingress
+    - security
+
+dependencies: []

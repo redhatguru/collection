@@ -1,0 +1,9 @@
+---
+k3s_app_python_packages:
+  - python3-kubernetes
+  - python3-yaml
+
+k3s_app_pip_package: "python3-pip"
+# Ubuntu 24.04 and Debian 12 mark their system Python as externally managed
+# (PEP 668), so pip refuses to install into it without this.
+k3s_app_pip_extra_args: "--break-system-packages"

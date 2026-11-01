@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+DEFAULT menu.c32
+PROMPT 0
+TIMEOUT 100
+MENU TITLE PXE Boot Menu
+
+LABEL operating-systems
+    MENU LABEL Operating Systems >
+    MENU GOTO operating-systems
+
+LABEL troubleshooting
+    MENU LABEL Troubleshooting >
+    MENU GOTO troubleshooting
+
+MENU BEGIN operating-systems
+    MENU TITLE Operating Systems
+
+    LABEL back
+        MENU LABEL Back..
+        MENU EXIT
+MENU END
+
+MENU BEGIN troubleshooting
+    MENU TITLE Troubleshooting
+
+    LABEL memtest
+        MENU LABEL Memtest86+ {{ pxeboot_memtest_version }}
+        LINUX images/troubleshooting/memtest/memtest.bin
+
+    LABEL back
+        MENU LABEL Back..
+        MENU EXIT
+MENU END

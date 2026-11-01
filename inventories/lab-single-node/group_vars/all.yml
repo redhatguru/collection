@@ -1,0 +1,158 @@
+---
+# Single-node lab cluster.
+#
+# The only values that genuinely have to be set for a working cluster are the
+# MetalLB address pool and the ingress address — there is no safe default for
+# addresses on someone else's network.
+
+# --------------------------------------------------------------------------
+# Cluster
+# --------------------------------------------------------------------------
+
+# Pin this for a reproducible build. Left empty, the role resolves the current
+# release from the official stable channel at run time.
+k3s_version: ""
+k3s_channel: "stable"
+
+# Shared cluster secret. Generate one and keep it in Ansible Vault:
+#   openssl rand -hex 32
+#   ansible-vault encrypt_string --name vault_k3s_token '<value>'
+# Left empty, the role generates a token on first run and reuses it after
+# that, which works but is not reproducible on a rebuild.
+# k3s_token: "{{ vault_k3s_token }}"
+
+# --------------------------------------------------------------------------
+# Firewall — narrow these to your own networks
+# --------------------------------------------------------------------------
+
+k3s_firewall_enabled: true
+k3s_firewall_ssh_sources:
+  - 10.10.0.0/16
+k3s_firewall_api_sources:
+  - 10.10.0.0/16
+# Left empty so the ingress is reachable from anywhere, which is normally the
+# point of an ingress.
+k3s_firewall_ingress_sources: []
+
+# --------------------------------------------------------------------------
+# MetalLB — must be free addresses on this node's own layer-2 segment,
+# outside the DHCP range
+# --------------------------------------------------------------------------
+
+k3s_metallb_enabled: true
+k3s_metallb_mode: "layer2"
+k3s_metallb_address_pools:
+  - name: default
+    addresses:
+      - 10.10.50.100-10.10.50.110
+
+# --------------------------------------------------------------------------
+# Traefik — one shared address, every hostname points here (DNS model B)
+# --------------------------------------------------------------------------
+
+k3s_traefik_enabled: true
+k3s_traefik_loadbalancer_ip: "10.10.50.100"
+k3s_traefik_http_redirect_enabled: true
+
+# --------------------------------------------------------------------------
+# cert-manager — an internal CA, because Let's Encrypt cannot validate a
+# .local name
+# --------------------------------------------------------------------------
+
+k3s_cert_manager_enabled: true
+k3s_cert_manager_issuers:
+  - name: internal-ca
+    type: ca
+    ca_common_name: "Lab Root CA"
+    ca_duration: "87600h"
+
+# --------------------------------------------------------------------------
+# Validation — proves the hostname actually routes before the play finishes
+# --------------------------------------------------------------------------
+
+k3s_validate_ingress_hosts:
+  - host: hello.example.local
+    path: /
+
+# --------------------------------------------------------------------------
+# Applications (used by playbooks/applications.yml, not by the cluster role)
+# --------------------------------------------------------------------------
+
+k3s_app_ingress_class: "traefik"
+k3s_app_ingress_namespace: "traefik"
+
+k3s_app_applications:
+  # A worked example: unprivileged nginx, one replica, its own namespace,
+  # reached on https://hello.example.local through Traefik with a certificate
+  # issued by the internal CA above.
+  #
+  # The image is nginx-unprivileged rather than nginx: the stock image runs as
+  # root and writes to /var/cache, so it cannot satisfy the "restricted" Pod
+  # Security Standard this role enforces on application namespaces.
+  - name: hello
+    namespace: hello
+    enabled: true
+    kind: Deployment
+    replicas: 1
+
+    image:
+      repository: nginxinc/nginx-unprivileged
+      tag: "1.27-alpine"
+      pull_policy: IfNotPresent
+
+    ports:
+      - name: http
+        container_port: 8080
+
+    service:
+      enabled: true
+      type: ClusterIP
+      port: 80
+      target_port: http
+
+    ingress:
+      enabled: true
+      host: hello.example.local
+      path: /
+      tls: true
+      cluster_issuer: internal-ca
+
+    resources:
+      requests:
+        cpu: "25m"
+        memory: "32Mi"
+      limits:
+        cpu: "200m"
+        memory: "128Mi"
+
+    # The stock nginx-unprivileged image needs somewhere writable, and the
+    # default security context mounts the root filesystem read-only.
+    volumes:
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+    volume_mounts:
+      - name: cache
+        mountPath: /var/cache/nginx
+      - name: run
+        mountPath: /tmp
+
+    readiness_probe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 3
+      periodSeconds: 10
+    liveness_probe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 10
+      periodSeconds: 20
+
+    network_policy:
+      enabled: true
+      allow_dns: true
+      allow_from_ingress: true
+      allow_api_server: false

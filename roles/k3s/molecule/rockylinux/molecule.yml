@@ -1,0 +1,47 @@
+---
+# The same single-node topology as the default scenario, on the other supported
+# OS family: Rocky Linux 9, firewalld, SELinux left enforcing.
+#
+# This is where the firewalld path and the k3s-selinux policy are exercised —
+# the two things the role has to get right without ever disabling either.
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  parallel: false
+  provider:
+    name: virtualbox
+platforms:
+  - name: k8s-rocky-single
+    box: bento/rockylinux-9
+    memory: 3072
+    cpus: 2
+    groups:
+      - k8s_control_plane
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.22.11
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "../../.."
+  playbooks:
+    prepare: ../resources/prepare.yml
+    converge: ../resources/converge.yml
+    verify: ../resources/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
+      host_vars: ../resources/host_vars
+verifier:
+  name: ansible
+ansible:
+  cfg:
+    ssh_connection:
+      retries: 5
+    defaults:
+      timeout: 60

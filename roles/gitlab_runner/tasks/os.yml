@@ -1,0 +1,21 @@
+---
+# Both apt sources this role adds are managed with deb822_repository, which is
+# implemented on top of the python-debian library and refuses to run without
+# it — hence python3-debian among the packages below.
+
+- name: "DEBIAN | Ensure the packages this role needs are present"
+  ansible.builtin.apt:
+    name: "{{ gitlab_runner_os_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: "DEBIAN | Ensure the keyring directory for third-party apt repositories exists"
+  ansible.builtin.file:
+    path: "{{ gitlab_runner_apt_keyring_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true

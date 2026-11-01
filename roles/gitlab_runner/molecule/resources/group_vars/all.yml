@@ -1,0 +1,36 @@
+---
+# Shared test configuration, loaded by the scenario's molecule.yml.
+#
+# Only this role's variables live here. What the GitLab in this scenario looks
+# like is passed to the gitlab role where it is included, in converge.yml:
+# those are another role's variables, and keeping them out of here keeps each
+# file about one thing.
+
+# Both VMs resolve this name to the GitLab VM's private address, so the runner
+# reaches GitLab by the name in its certificate.
+gitlab_runner_test_hostname: "gitlab.molecule.local"
+gitlab_runner_test_gitlab_ip: "10.10.32.11"
+
+# --------------------------------------------------------------------------
+# The runner
+# --------------------------------------------------------------------------
+
+gitlab_runner_url: "https://gitlab.molecule.local"
+gitlab_runner_description: "molecule-docker-runner"
+gitlab_runner_tags:
+  - docker
+  - molecule
+gitlab_runner_run_untagged: true
+
+# One job at a time: this VM has two cores and 2 GB.
+gitlab_runner_concurrent: 1
+
+# Small enough to pull quickly, and the image verify.yml runs a container
+# with.
+gitlab_runner_docker_image: "alpine:3.21"
+
+# The runner VM is small; these are the role's floor rather than a
+# recommendation.
+gitlab_runner_preflight_min_cpu: 2
+gitlab_runner_preflight_min_memory_mb: 1900
+gitlab_runner_preflight_min_disk_free_mb: 10240

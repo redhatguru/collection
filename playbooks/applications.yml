@@ -1,0 +1,14 @@
+---
+# Deploys applications onto a cluster that already exists. Completely separate
+# from playbooks/k3s.yml: adding, changing or removing an application
+# never touches the infrastructure role.
+#
+# Runs on one control-plane node, because that is where the kubeconfig lives.
+# Point k3s_app_kubeconfig somewhere else to drive the cluster from a
+# management host instead.
+- name: Deploy the applications onto the Kubernetes cluster
+  hosts: k8s_control_plane[0]
+  gather_facts: true
+
+  roles:
+    - role: redhatguru.general.k3s_app

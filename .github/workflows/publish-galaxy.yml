@@ -3,12 +3,28 @@ name: publish-galaxy
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A push to main and a tag on the same commit start two runs. One at a time, so
+# the second sees what the first published instead of publishing it again.
+concurrency:
+  group: publish-galaxy
+  cancel-in-progress: false
+
 jobs:
+  # A version on Galaxy cannot be replaced, so nothing unlinted gets that far.
+  lint:
+    uses: ./.github/workflows/ansible-lint.yml
+
   publish:
+    needs: lint
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -22,18 +38,52 @@ jobs:
       - name: Install ansible-core
         run: pip install ansible-core
 
+      - name: Read the version from galaxy.yml
+        id: version
+        run: |
+          echo "version=$(sed -n 's/^version: *//p' galaxy.yml | tr -d '"')" >> "$GITHUB_OUTPUT"
+
       - name: Verify the tag matches galaxy.yml's version
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GALAXY_VERSION: ${{ steps.version.outputs.version }}
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
-          galaxy_version="$(sed -n 's/^version: *//p' galaxy.yml | tr -d '"')"
-          if [ "$tag_version" != "$galaxy_version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match galaxy.yml version $galaxy_version" >&2
+          if [ "$tag_version" != "$GALAXY_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match galaxy.yml version $GALAXY_VERSION" >&2
             exit 1
           fi
 
+      # Most pushes to main do not raise the version, and those have nothing to
+      # publish. Any answer but 200 or 404 stops the run: not knowing whether a
+      # version exists is no reason to try publishing it.
+      - name: Check whether this version is already on Galaxy
+        id: galaxy
+        env:
+          GALAXY_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          url="https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/redhatguru/general/versions/$GALAXY_VERSION/"
+          status="$(curl --silent --location --retry 3 --output /dev/null --write-out '%{http_code}' "$url")"
+          case "$status" in
+            200)
+              echo "::notice::redhatguru.general $GALAXY_VERSION is already on Galaxy. Raise the version in galaxy.yml to publish."
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Galaxy answered $status for $url" >&2
+              exit 1
+              ;;
+          esac
+
       - name: Build the collection
+        if: steps.galaxy.outputs.published == 'false'
         run: ansible-galaxy collection build --output-path build
 
       - name: Publish to Ansible Galaxy
-        run: ansible-galaxy collection publish build/*.tar.gz --api-key "${{ secrets.GALAXY_API_KEY }}"
+        if: steps.galaxy.outputs.published == 'false'
+        env:
+          GALAXY_API_KEY: ${{ secrets.GALAXY_API_KEY }}
+        run: ansible-galaxy collection publish build/*.tar.gz --api-key "$GALAXY_API_KEY"

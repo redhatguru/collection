@@ -1,0 +1,11 @@
+---
+# python3-kubernetes comes from EPEL on RHEL-family hosts. When EPEL is not
+# available the role falls back to pip (k3s_app_pip_fallback_enabled).
+k3s_app_python_packages:
+  - python3-kubernetes
+  - python3-pyyaml
+
+k3s_app_pip_package: "python3-pip"
+# RHEL 9 ships a pip that predates PEP 668 and does not know
+# --break-system-packages, so passing it would fail the install outright.
+k3s_app_pip_extra_args: ""

@@ -1,0 +1,150 @@
+---
+- name: "DEBIAN | Ensure the packages Kubernetes needs on the host are installed"
+  ansible.builtin.apt:
+    name: "{{ k3s_prerequisite_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Ensure the packages Kubernetes needs on the host are installed"
+  ansible.builtin.dnf:
+    name: "{{ k3s_prerequisite_packages }}"
+    state: present
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "ALL | Ensure the system hostname matches the node name used in the cluster"
+  ansible.builtin.hostname:
+    name: "{{ k3s_node_name }}"
+  become: true
+  notify: "reload systemd"
+  when: k3s_manage_hostname | bool
+
+- name: "ALL | Ensure every cluster node resolves to its node address in /etc/hosts"
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED BLOCK redhatguru.general.k3s"
+    block: |
+      {% for host in k3s_cluster_hosts %}
+      {{ hostvars[host]['k3s_node_ip'] }} {{ hostvars[host]['k3s_node_name'] }}
+      {% endfor %}
+    mode: "0644"
+    owner: root
+    group: root
+  become: true
+  when: k3s_manage_etc_hosts | bool
+
+- name: "ALL | Ensure the kernel modules the container network needs are loaded now"
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  become: true
+  loop: "{{ k3s_kernel_modules }}"
+
+- name: "ALL | Ensure those kernel modules are also loaded after a reboot"
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/90-k3s.conf
+    content: |
+      # Managed by redhatguru.general.k3s
+      {% for module in k3s_kernel_modules %}
+      {{ module }}
+      {% endfor %}
+    mode: "0644"
+    owner: root
+    group: root
+  become: true
+
+- name: "ALL | Ensure the sysctl settings Kubernetes networking depends on are applied"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-k3s.conf
+    sysctl_set: true
+    reload: true
+    state: present
+  become: true
+  loop: "{{ k3s_sysctl_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+
+# protect-kernel-defaults makes the kubelet refuse to start rather than
+# silently rewrite these four values, so they have to be in place before K3s
+# is installed — never enable the K3s flag without this task.
+- name: "ALL | Ensure the kernel defaults the kubelet refuses to change itself are set"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-k3s-kubelet.conf
+    sysctl_set: true
+    reload: true
+    state: present
+  become: true
+  loop: "{{ k3s_protect_kernel_sysctls | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  when: k3s_protect_kernel_defaults | bool
+
+- name: "ALL | Ensure the requested resource limits are in place"
+  community.general.pam_limits:
+    dest: /etc/security/limits.d/90-k3s.conf
+    domain: "{{ item.domain }}"
+    limit_type: "{{ item.limit_type }}"
+    limit_item: "{{ item.limit_item }}"
+    value: "{{ item.value }}"
+  become: true
+  loop: "{{ k3s_os_limits }}"
+  loop_control:
+    label: "{{ item.domain }} {{ item.limit_type }} {{ item.limit_item }}={{ item.value }}"
+
+- name: "DEBIAN | Ensure the time synchronisation daemon is installed"
+  ansible.builtin.apt:
+    name: "{{ k3s_time_sync_package }}"
+    state: present
+  become: true
+  when:
+    - k3s_manage_time_sync | bool
+    - ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Ensure the time synchronisation daemon is installed"
+  ansible.builtin.dnf:
+    name: "{{ k3s_time_sync_package }}"
+    state: present
+  become: true
+  when:
+    - k3s_manage_time_sync | bool
+    - ansible_facts['os_family'] == 'RedHat'
+
+- name: "ALL | Ensure the time synchronisation daemon is enabled and running"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_time_sync_service }}"
+    state: started
+    enabled: true
+  become: true
+  when: k3s_manage_time_sync | bool
+
+# etcd's leader election and every TLS certificate in the cluster depend on the
+# clock; a freshly booted VM can take a moment to converge, hence the retries.
+- name: "ALL | Confirm the system clock is synchronised to a time source"
+  ansible.builtin.command:
+    argv: [timedatectl, show, --property=NTPSynchronized, --value]
+  register: k3s_time_sync_state
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: k3s_time_sync_state.stdout | trim == 'yes'
+  when: k3s_require_time_sync | bool
+
+- name: "ALL | Ensure an unsynchronised clock stops the run with a clear reason"
+  ansible.builtin.assert:
+    that:
+      - k3s_time_sync_state.stdout | trim == 'yes'
+    fail_msg: >-
+      {{ inventory_hostname }} reports its clock as unsynchronised after
+      60 seconds. etcd's leader election and the cluster's TLS certificates
+      both depend on a correct clock. Check that
+      {{ k3s_time_sync_service }} can reach a time source, or set
+      k3s_require_time_sync to false to continue anyway.
+    quiet: true
+  when: k3s_require_time_sync | bool

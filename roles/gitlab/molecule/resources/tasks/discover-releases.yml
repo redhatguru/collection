@@ -1,0 +1,40 @@
+---
+# Works out which two releases the test uses, from what the repository
+# actually offers right now: the newest release is the upgrade target, and the
+# one below it within the same major is what gets installed first. Pinning two
+# literal versions here would mean the scenario slowly rots as GitLab
+# withdraws old packages, and would not exercise the upgrade path check the
+# way a real pair of adjacent releases does.
+#
+# Included by converge.yml, side-effect.yml and verify.yml, because facts set
+# in one Molecule playbook are gone by the next. It runs outside the role, so
+# it reads gitlab_edition from the scenario's group_vars rather than from the
+# role's defaults, which are not in scope here.
+
+- name: "DEBIAN | Collect every GitLab release the package repository offers"
+  ansible.builtin.command:
+    argv: [apt-cache, madison, "gitlab-{{ gitlab_edition }}"]
+  register: gitlab_test_madison
+  changed_when: false
+
+- name: "ALL | Pick the release to install and the release to upgrade to"
+  ansible.builtin.set_fact:
+    gitlab_test_target_version: "{{ gitlab_test_releases | last }}"
+    gitlab_test_initial_version: >-
+      {{ gitlab_test_same_major[-2] if gitlab_test_same_major | length > 1
+         else gitlab_test_releases[-2] }}
+  vars:
+    # Ascending, so the newest release is last.
+    gitlab_test_releases: >-
+      {{ gitlab_test_madison.stdout_lines
+         | map('regex_search', '[0-9]+\.[0-9]+\.[0-9]+-' ~ gitlab_edition ~ '\.[0-9]+')
+         | select('string') | unique | community.general.version_sort }}
+    gitlab_test_same_major: >-
+      {{ gitlab_test_releases
+         | select('match', (gitlab_test_releases | last | split('.') | first) ~ '\.') | list }}
+
+- name: "ALL | Report which releases this test run uses"
+  ansible.builtin.debug:
+    msg: >-
+      Installing {{ gitlab_test_initial_version }} and upgrading to
+      {{ gitlab_test_target_version }}.

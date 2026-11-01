@@ -1,0 +1,30 @@
+---
+# RedHat-family specifics, loaded by tasks/main.yml from the os_family fact.
+
+k3s_os_family: "RedHat"
+k3s_package_manager: "dnf"
+k3s_service_manager: "systemd"
+k3s_firewall_backend_default: "firewalld"
+k3s_firewall_package: "firewalld"
+
+# curl is deliberately absent: RHEL 9 ships curl-minimal and asking for curl
+# makes dnf try to swap it out. Everything downloaded here goes through
+# ansible.builtin.get_url, which does not need it.
+k3s_prerequisite_packages:
+  - ca-certificates
+  - conntrack-tools
+  - gzip
+  - iptables-nft
+  - python3-pyyaml
+  - socat
+  - tar
+
+k3s_time_sync_package: "chrony"
+k3s_time_sync_service: "chronyd"
+
+# nm-cloud-setup rewrites the routing table from cloud metadata on a timer,
+# which tears down the routes the CNI installed. Upstream K3s requires it to
+# be disabled on RHEL-family cloud images.
+k3s_unused_services:
+  - nm-cloud-setup.service
+  - nm-cloud-setup.timer

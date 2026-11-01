@@ -1,0 +1,18 @@
+---
+# Takes a backup of a running GitLab now: the data archive and the
+# configuration archive that holds gitlab-secrets.json, because a restore
+# needs both. The role checks that each one actually appeared and prints where
+# they went.
+#
+# The nightly equivalents are installed by the role itself
+# (gitlab_backup_enabled); this playbook is for the backup you take before
+# doing something you might regret.
+- name: Back up GitLab now
+  hosts: gitlab_servers
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Take a backup of this GitLab instance"
+      ansible.builtin.include_role:
+        name: redhatguru.general.gitlab
+        tasks_from: backup-create.yml

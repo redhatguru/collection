@@ -1,0 +1,86 @@
+---
+# The firewall stays on, and only the ports this instance actually serves are
+# opened — see vars/main.yml for how that set is derived from the external URL
+# and the enabled components, so an https instance gets 443 and an http one
+# gets 80, rather than both because the role could not tell.
+#
+# The order here is deliberate: SSH is allowed first and ufw is enabled last,
+# so enabling the firewall can never drop the session this play is running
+# over. That is also why this runs after the GitLab package is installed —
+# rebuilding the ruleset can reset connection tracking, and nothing should be
+# mid-download when it happens.
+
+- name: "DEBIAN | Ensure ufw is installed"
+  ansible.builtin.package:
+    name: "{{ gitlab_firewall_package }}"
+    state: present
+  become: true
+
+- name: "DEBIAN | Allow SSH from anywhere so the firewall cannot lock this host out"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  become: true
+  loop: "{{ gitlab_firewall_ssh_ports }}"
+  when: gitlab_firewall_ssh_sources | length == 0
+
+- name: "DEBIAN | Allow SSH from the management networks only"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0 | string }}"
+    proto: tcp
+    from_ip: "{{ item.1 }}"
+  become: true
+  loop: "{{ gitlab_firewall_ssh_ports | product(gitlab_firewall_ssh_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/tcp from {{ item.1 }}"
+
+- name: "DEBIAN | Allow the GitLab web ports from anywhere"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  become: true
+  loop: "{{ gitlab_firewall_web_ports }}"
+  when: gitlab_firewall_http_sources | length == 0
+
+- name: "DEBIAN | Allow the GitLab web ports from the permitted networks only"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0 | string }}"
+    proto: tcp
+    from_ip: "{{ item.1 }}"
+  become: true
+  loop: "{{ gitlab_firewall_web_ports | product(gitlab_firewall_http_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/tcp from {{ item.1 }}"
+
+- name: "DEBIAN | Allow the extra TCP ports this deployment asks for"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  become: true
+  loop: "{{ gitlab_firewall_extra_tcp_ports }}"
+
+- name: "DEBIAN | Allow the extra UDP ports this deployment asks for"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: udp
+  become: true
+  loop: "{{ gitlab_firewall_extra_udp_ports }}"
+
+- name: "DEBIAN | Ensure unsolicited incoming traffic is denied by default"
+  community.general.ufw:
+    default: deny
+    direction: incoming
+  become: true
+  when: gitlab_firewall_manage_state | bool
+
+- name: "DEBIAN | Ensure ufw is enabled"
+  community.general.ufw:
+    state: enabled
+  become: true
+  when: gitlab_firewall_manage_state | bool

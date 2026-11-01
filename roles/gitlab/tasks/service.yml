@@ -1,0 +1,19 @@
+---
+# What makes the instance survive a reboot.
+#
+# GitLab's own services are supervised by runit, and runit by a single systemd
+# unit — gitlab-runsvdir. `gitlab-ctl start|stop|restart` talks to runit and
+# says nothing about what happens at boot; this unit does.
+#
+# The package enables it at install time and `gitlab-ctl reconfigure` enables
+# it again, so a fresh install already comes back on its own. This task is
+# here so that the guarantee belongs to the role rather than to the package's
+# behaviour, and so that a host where someone disabled the unit is corrected
+# instead of quietly staying down after its next reboot.
+
+- name: "ALL | Ensure the systemd unit that brings GitLab back after a reboot is enabled"
+  ansible.builtin.systemd_service:
+    name: "{{ gitlab_runsvdir_service_name }}"
+    state: started
+    enabled: true
+  become: true

@@ -7,13 +7,13 @@
 # confirm the resulting rollout actually completed rather than just
 # firing the apply and walking away.
 
-- name: Re-apply the AWX Operator (picks up awx_operator_version changes)
+- name: "ALL | Re-apply the AWX Operator (picks up awx_operator_version changes)"
   ansible.builtin.include_tasks: operator.yml
 
-- name: Re-apply the AWX instance manifest (picks up awx_image_version changes)
+- name: "ALL | Re-apply the AWX instance manifest (picks up awx_image_version changes)"
   ansible.builtin.include_tasks: deploy.yml
 
-- name: Wait for the AWX web/task rollout to finish
+- name: "ALL | Wait for the AWX web/task rollout to finish"
   # Mirrors "kubectl rollout status": a Deployment's "Progressing"
   # condition carries reason "NewReplicaSetAvailable" once the newest
   # ReplicaSet from this rollout is fully up, which is exactly what

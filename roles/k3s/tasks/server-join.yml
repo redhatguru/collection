@@ -1,0 +1,26 @@
+---
+- name: "ALL | Wait for the cluster registration endpoint to be reachable from this node"
+  ansible.builtin.wait_for:
+    host: "{{ k3s_api_registration_address }}"
+    port: "{{ k3s_api_port | int }}"
+    timeout: "{{ k3s_wait_timeout | int }}"
+
+# Throttled to one node: adding several etcd members at once to a cluster that
+# has only just been initialised races on the member list. The unit is
+# Type=notify, so systemd does not report the start complete until this node's
+# API server is actually serving — which makes the next node's turn safe.
+- name: "ALL | Start K3s so this control-plane node joins the cluster"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    state: started
+  become: true
+  throttle: 1
+
+- name: "ALL | Wait for the local API server to accept connections after joining"
+  ansible.builtin.wait_for:
+    host: "{{ k3s_node_ip }}"
+    port: "{{ k3s_api_port | int }}"
+    timeout: "{{ k3s_wait_timeout | int }}"
+
+- name: "ALL | Wait for this control-plane node to be Ready"
+  ansible.builtin.include_tasks: wait-node-ready.yml

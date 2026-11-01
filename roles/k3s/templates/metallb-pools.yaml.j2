@@ -1,0 +1,64 @@
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+#
+# Applied through K3s' auto-deploying manifests directory, so the pools are
+# reconciled on every K3s start and removing this file removes the pools.
+{% for pool in k3s_metallb_address_pools %}
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: "{{ pool.name }}"
+  namespace: "{{ k3s_metallb_namespace }}"
+spec:
+  addresses:
+{% for address in pool.addresses %}
+    - "{{ address }}"
+{% endfor %}
+  autoAssign: {{ pool.auto_assign | default(true) | bool | lower }}
+  # Skips the .0 and .255 addresses of a pool given as a CIDR, which some
+  # consumer equipment still refuses to route to.
+  avoidBuggyIPs: {{ pool.avoid_buggy_ips | default(true) | bool | lower }}
+{% endfor %}
+{% if k3s_metallb_mode == 'layer2' %}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: default
+  namespace: "{{ k3s_metallb_namespace }}"
+spec:
+  ipAddressPools:
+{% for pool in k3s_metallb_address_pools %}
+    - "{{ pool.name }}"
+{% endfor %}
+{% else %}
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  name: default
+  namespace: "{{ k3s_metallb_namespace }}"
+spec:
+  ipAddressPools:
+{% for pool in k3s_metallb_address_pools %}
+    - "{{ pool.name }}"
+{% endfor %}
+{% for peer in k3s_metallb_bgp_peers %}
+---
+apiVersion: metallb.io/v1beta2
+kind: BGPPeer
+metadata:
+  name: "{{ peer.name }}"
+  namespace: "{{ k3s_metallb_namespace }}"
+spec:
+  myASN: {{ peer.my_asn | int }}
+  peerASN: {{ peer.peer_asn | int }}
+  peerAddress: "{{ peer.peer_address }}"
+{% if peer.peer_port is defined %}
+  peerPort: {{ peer.peer_port | int }}
+{% endif %}
+{% if peer.source_address is defined %}
+  sourceAddress: "{{ peer.source_address }}"
+{% endif %}
+{% endfor %}
+{% endif %}

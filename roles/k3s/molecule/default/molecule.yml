@@ -1,4 +1,13 @@
 ---
+# The baseline scenario: Ubuntu 24.04, single node, ufw.
+#
+# One control-plane host and no workers, which is what makes the role derive
+# k3s_topology == 'single-node' and collapse Traefik to one replica.
+#
+# Each single-node OS gets its own scenario rather than two platforms in this
+# one, because two hosts in k8s_control_plane are read as a single cluster with
+# two control-plane nodes — a configuration the role rejects outright, since an
+# etcd quorum of two means either failure stops the cluster.
 dependency:
   name: galaxy
 driver:
@@ -7,34 +16,15 @@ driver:
   provider:
     name: virtualbox
 platforms:
-  - name: rockylinux9
-    box: bento/rockylinux-9
-    memory: 2048
-    cpus: 2
-    instance_raw_config_args:
-      - "vm.boot_timeout = 600"
-    config_options:
-      ssh.insert_key: false
-  - name: rockylinux10
-    box: bento/rockylinux-10
-    memory: 2048
-    cpus: 2
-    instance_raw_config_args:
-      - "vm.boot_timeout = 600"
-    config_options:
-      ssh.insert_key: false
-  - name: ubuntu2404
+  - name: k8s-ubuntu-single
     box: bento/ubuntu-24.04
-    memory: 2048
+    memory: 3072
     cpus: 2
-    instance_raw_config_args:
-      - "vm.boot_timeout = 600"
-    config_options:
-      ssh.insert_key: false
-  - name: ubuntu2604
-    box: bento/ubuntu-26.04
-    memory: 2048
-    cpus: 2
+    groups:
+      - k8s_control_plane
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.21.11
     instance_raw_config_args:
       - "vm.boot_timeout = 600"
     config_options:
@@ -44,7 +34,13 @@ provisioner:
   env:
     ANSIBLE_ROLES_PATH: "../../.."
   playbooks:
-    prepare: prepare.yml
+    prepare: ../resources/prepare.yml
+    converge: ../resources/converge.yml
+    verify: ../resources/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
+      host_vars: ../resources/host_vars
 verifier:
   name: ansible
 ansible:
@@ -52,4 +48,4 @@ ansible:
     ssh_connection:
       retries: 5
     defaults:
-      timeout: 30
+      timeout: 60

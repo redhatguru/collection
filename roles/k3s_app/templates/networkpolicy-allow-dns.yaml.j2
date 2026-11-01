@@ -1,0 +1,30 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# Without this, pods in a default-denied namespace cannot resolve a single
+# name — the failure that makes a default-deny policy look like a broken
+# application.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ k3s_app_item.name }}-allow-dns"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/managed-by: ansible
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

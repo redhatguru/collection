@@ -1,0 +1,42 @@
+---
+# Runs after the cluster is up, because most of these paths are created by K3s
+# on first start. Every path is checked first, so the same list applies to a
+# control-plane node and to a worker, where most of it does not exist.
+
+- name: "ALL | Check which Kubernetes credential and data paths exist on this node"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  become: true
+  register: k3s_hardening_paths
+  loop: "{{ k3s_hardening_restricted_dirs + k3s_hardening_restricted_files }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: "ALL | Ensure the Kubernetes credential and data directories are root-only"
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  loop: "{{ k3s_hardening_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.stat.exists | default(false)
+    - item.stat.isdir | default(false)
+
+- name: "ALL | Ensure the Kubernetes credential files are readable by root only"
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  loop: "{{ k3s_hardening_paths.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.stat.exists | default(false)
+    - item.stat.isreg | default(false)

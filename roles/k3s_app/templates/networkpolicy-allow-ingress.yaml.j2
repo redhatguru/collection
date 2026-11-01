@@ -1,0 +1,26 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# Lets the ingress controller reach this application's pods, and nothing else
+# in the cluster. Traffic from other application namespaces stays denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: "{{ k3s_app_item.name }}-allow-ingress"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/managed-by: ansible
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+      app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: >-
+                {{ k3s_app_item.network_policy.ingress_namespace
+                   | default(k3s_app_ingress_namespace) }}

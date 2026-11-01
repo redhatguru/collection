@@ -1,0 +1,23 @@
+---
+- name: "ALL | Template the dnsmasq configuration"
+  ansible.builtin.template:
+    src: dnsmasq.conf.j2
+    dest: /etc/dnsmasq.conf
+    mode: "0644"
+    validate: "dnsmasq --conf-file=%s --test"
+  become: true
+  notify: "ALL | Restart dnsmasq"
+
+- name: "ALL | Template the PXELINUX boot menu"
+  ansible.builtin.template:
+    src: pxelinux-default.j2
+    dest: "{{ pxeboot_tftp_root }}/pxelinux.cfg/default"
+    mode: "0644"
+  become: true
+
+- name: "ALL | Ensure dnsmasq is enabled and running"
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: started
+    enabled: true
+  become: true

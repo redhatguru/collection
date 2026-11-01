@@ -1,0 +1,191 @@
+---
+# HA lab cluster: three control-plane nodes, one worker.
+
+# --------------------------------------------------------------------------
+# Cluster
+# --------------------------------------------------------------------------
+
+# Pinned, because an HA cluster is the last place you want two nodes on
+# different releases because the channel moved between runs.
+k3s_version: ""
+k3s_channel: "stable"
+
+# Required for an HA control plane — the sqlite backend cannot be shared.
+# Already the default; stated here because it is what makes this cluster HA.
+k3s_cluster_init: true
+
+# Keep this in Ansible Vault. With a fixed token a rebuilt node rejoins the
+# existing cluster instead of needing the token read off a surviving node.
+# k3s_token: "{{ vault_k3s_token }}"
+
+# Address new nodes register against. The default is the first control-plane
+# node, which is a single point of failure for *joining* — running nodes are
+# unaffected. Point this at a VIP or an external load balancer in front of all
+# three control-plane nodes for an endpoint that survives losing one of them,
+# and the role will add it to the API server certificate automatically.
+# k3s_api_registration_address: "10.10.50.10"
+k3s_api_extra_tls_san:
+  - k8s.example.local
+
+# Left off deliberately in this example. Tainting the control plane is the
+# right call once there are enough workers to run the add-ons on, but this
+# cluster has one worker: with the taint on, every Traefik replica would be
+# squeezed onto that single node and the ingress would stop being highly
+# available. Turn it on together with a second and third worker.
+k3s_taint_control_plane: false
+
+# --------------------------------------------------------------------------
+# Firewall
+# --------------------------------------------------------------------------
+
+k3s_firewall_enabled: true
+k3s_firewall_ssh_sources:
+  - 10.10.0.0/16
+k3s_firewall_api_sources:
+  - 10.10.0.0/16
+k3s_firewall_ingress_sources: []
+
+# --------------------------------------------------------------------------
+# MetalLB
+# --------------------------------------------------------------------------
+
+k3s_metallb_enabled: true
+k3s_metallb_mode: "layer2"
+k3s_metallb_address_pools:
+  - name: default
+    addresses:
+      - 10.10.50.100-10.10.50.110
+
+# --------------------------------------------------------------------------
+# Traefik — HA: a replica per schedulable node, spread across nodes, with a
+# disruption budget so a node drain cannot take the ingress down
+# --------------------------------------------------------------------------
+
+k3s_traefik_enabled: true
+k3s_traefik_loadbalancer_ip: "10.10.50.100"
+# Empty means "one replica per schedulable node, capped at
+# k3s_traefik_max_replicas" — three here, one per control-plane node
+# worth of capacity, spread over separate nodes. Set it explicitly to run more
+# replicas than there are nodes to spread them over.
+k3s_traefik_replicas: ""
+k3s_traefik_pod_anti_affinity: true
+k3s_traefik_topology_spread: true
+k3s_traefik_pdb_min_available: 1
+
+# --------------------------------------------------------------------------
+# etcd snapshots — the only thing that makes an HA cluster recoverable
+# --------------------------------------------------------------------------
+
+k3s_etcd_backup_enabled: true
+k3s_etcd_backup_schedule: "0 */6 * * *"
+k3s_etcd_backup_retention: 20
+
+# --------------------------------------------------------------------------
+# Storage — be explicit that this cluster has no shared storage
+# --------------------------------------------------------------------------
+
+# K3s' local-path provisioner is node-local: a pod that moves to another node
+# does not find its data. For anything that has to survive rescheduling, add a
+# real CSI driver and point k3s_storage_extra_classes at it.
+k3s_storage_enabled: true
+k3s_storage_local_path_enabled: true
+
+# --------------------------------------------------------------------------
+# cert-manager
+# --------------------------------------------------------------------------
+
+k3s_cert_manager_enabled: true
+k3s_cert_manager_issuers:
+  - name: internal-ca
+    type: ca
+    ca_common_name: "Lab Root CA"
+  # Let's Encrypt, for hostnames that resolve on the public internet. Start on
+  # staging: the production endpoint rate-limits failed attempts hard.
+  # - name: letsencrypt
+  #   type: acme
+  #   acme_server: staging
+  #   acme_email: hostmaster@example.com
+  #   solver: http01
+
+# --------------------------------------------------------------------------
+# Applications
+# --------------------------------------------------------------------------
+
+k3s_app_applications:
+  # Three replicas spread over the workers, to show the same application model
+  # scaling with the cluster rather than needing different definitions.
+  - name: hello
+    namespace: hello
+    enabled: true
+    kind: Deployment
+    replicas: 3
+
+    image:
+      repository: nginxinc/nginx-unprivileged
+      tag: "1.27-alpine"
+
+    ports:
+      - name: http
+        container_port: 8080
+
+    service:
+      type: ClusterIP
+      port: 80
+      target_port: http
+
+    ingress:
+      enabled: true
+      host: hello.example.local
+      tls: true
+      cluster_issuer: internal-ca
+
+    topology_spread_constraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: hello
+
+    volumes:
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+    volume_mounts:
+      - name: cache
+        mountPath: /var/cache/nginx
+      - name: run
+        mountPath: /tmp
+
+    readiness_probe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 3
+    liveness_probe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 10
+
+    network_policy:
+      enabled: true
+
+# Optional observability, as an example of the Helm path rather than the
+# built-in application model. Deliberately commented out: the role installs
+# metrics-server and nothing else by default.
+# k3s_app_helm_releases:
+#   - name: kube-prometheus-stack
+#     namespace: monitoring
+#     chart_ref: prometheus-community/kube-prometheus-stack
+#     chart_repo_url: https://prometheus-community.github.io/helm-charts
+#     chart_version: "65.1.1"
+#     pod_security_level: baseline
+#     values:
+#       grafana:
+#         ingress:
+#           enabled: true
+#           ingressClassName: traefik
+#           hosts:
+#             - grafana.example.local

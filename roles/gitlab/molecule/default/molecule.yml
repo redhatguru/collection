@@ -1,0 +1,74 @@
+---
+# The scenario: one Ubuntu 24.04 VM, installed at one GitLab release, backed
+# up, upgraded to the next one, and then verified.
+#
+# 24.04 rather than 26.04, which the role also supports: the repository's
+# noble suite carries GitLab's whole release history, and the upgrade half of
+# this test needs two adjacent releases to resolve from it.
+#
+# The VM is deliberately as big as GitLab's published minimum (4 vCPU, 8 GB,
+# plus a swap file prepare.yml creates) — the role's preflight checks insist
+# on that minimum, and a scenario that lowered them would be testing a
+# different role than the one anyone will run.
+#
+# The test sequence is what makes this cover all three paths in one VM:
+# converge installs, side_effect backs up and upgrades, verify checks the
+# result. Idempotence runs between them, which is what proves a second
+# configuration run does not reconfigure GitLab for nothing.
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  parallel: false
+  provider:
+    name: virtualbox
+platforms:
+  - name: gitlab-ubuntu
+    box: bento/ubuntu-24.04
+    memory: 8192
+    cpus: 4
+    groups:
+      - gitlab_servers
+    interfaces:
+      - network_name: private_network
+        ip: 10.10.31.11
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "../../.."
+  playbooks:
+    prepare: ../resources/prepare.yml
+    converge: ../resources/converge.yml
+    side_effect: ../resources/side-effect.yml
+    verify: ../resources/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
+verifier:
+  name: ansible
+scenario:
+  # The default sequence, with side_effect spelled out: the backup and the
+  # upgrade run against the instance converge built, before verify looks at it.
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy
+ansible:
+  cfg:
+    ssh_connection:
+      retries: 5
+    defaults:
+      timeout: 60

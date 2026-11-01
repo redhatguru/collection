@@ -1,0 +1,12 @@
+---
+- name: "ALL | Ensure pxeboot_dhcp_proxy_address is set when the DHCP proxy is enabled"
+  ansible.builtin.assert:
+    that:
+      - pxeboot_dhcp_proxy_address | length > 0
+    fail_msg: >-
+      pxeboot_dhcp_proxy_address must be set to an address within the
+      subnet PXE clients boot from — proxy-DHCP mode still needs to know
+      which subnet to answer PXE requests on, even though it never hands
+      out leases itself.
+    quiet: true
+  when: pxeboot_dhcp_proxy_enabled | bool

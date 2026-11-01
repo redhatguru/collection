@@ -1,0 +1,95 @@
+---
+- name: "ALL | Ensure the requested state is one this role implements"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_state in ['present', 'absent']
+      - k3s_app_pod_security_level in ['privileged', 'baseline', 'restricted']
+    fail_msg: >-
+      k3s_app_state must be 'present' or 'absent' (got
+      '{{ k3s_app_state }}') and k3s_app_pod_security_level must
+      be 'privileged', 'baseline' or 'restricted' (got
+      '{{ k3s_app_pod_security_level }}').
+    quiet: true
+
+- name: "ALL | Ensure every application has a name, a namespace and an image"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_enabled_applications | rejectattr('name', 'defined') | length == 0
+      - k3s_app_enabled_applications | rejectattr('namespace', 'defined') | length == 0
+      - k3s_app_enabled_applications | rejectattr('image', 'defined') | length == 0
+      - k3s_app_enabled_applications | map(attribute='image')
+        | rejectattr('repository', 'defined') | length == 0
+    fail_msg: >-
+      Every entry in k3s_app_applications needs name, namespace and
+      image.repository. Found:
+      {{ k3s_app_enabled_applications | map(attribute='name') | default(['<unnamed>']) | join(', ') }}.
+    quiet: true
+
+# An unpinned tag makes a deployment unreproducible: the same playbook run
+# tomorrow can pull a different image under the same name.
+- name: "ALL | Ensure every application image is pinned to a tag or digest"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_enabled_applications | map(attribute='image')
+        | rejectattr('tag', 'defined') | rejectattr('digest', 'defined') | length == 0
+      - k3s_app_enabled_applications | map(attribute='image')
+        | selectattr('tag', 'defined') | selectattr('tag', 'equalto', 'latest') | length == 0
+    fail_msg: >-
+      Every application image needs an explicit tag or digest, and it cannot be
+      'latest'. Without one, two runs of the same playbook can deploy different
+      software.
+    quiet: true
+
+- name: "ALL | Ensure every application workload kind is supported"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_enabled_applications | selectattr('kind', 'defined')
+        | map(attribute='kind') | reject('in', ['Deployment', 'StatefulSet']) | length == 0
+    fail_msg: >-
+      An application's kind must be 'Deployment' (the default) or
+      'StatefulSet'.
+    quiet: true
+
+- name: "ALL | Ensure every enabled Ingress names a host"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_ingress_definitions | rejectattr('host', 'defined') | length == 0
+    fail_msg: >-
+      An application with ingress.enabled also needs ingress.host — Traefik
+      routes on the hostname, so without one the Ingress matches nothing.
+      Point every hostname at the ingress load-balancer address in DNS.
+    quiet: true
+  vars:
+    k3s_app_ingress_definitions: >-
+      {{ k3s_app_enabled_applications | selectattr('ingress', 'defined')
+         | map(attribute='ingress') | selectattr('enabled', 'defined')
+         | selectattr('enabled') | list }}
+
+- name: "ALL | Ensure every Helm release names a chart and a namespace"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_helm_releases | rejectattr('name', 'defined') | length == 0
+      - k3s_app_helm_releases | rejectattr('namespace', 'defined') | length == 0
+      - k3s_app_helm_releases | rejectattr('chart_ref', 'defined') | length == 0
+    fail_msg: >-
+      Every entry in k3s_app_helm_releases needs name, namespace and
+      chart_ref. Add chart_version too: an unpinned chart is as
+      unreproducible as an unpinned image.
+    quiet: true
+
+- name: "ALL | Ensure the cluster credentials this role needs are present"
+  ansible.builtin.stat:
+    path: "{{ k3s_app_kubeconfig }}"
+  become: true
+  register: k3s_app_kubeconfig_file
+
+- name: "ALL | Ensure the kubeconfig exists before talking to the cluster"
+  ansible.builtin.assert:
+    that:
+      - k3s_app_kubeconfig_file.stat.exists
+    fail_msg: >-
+      No kubeconfig at {{ k3s_app_kubeconfig }} on
+      {{ inventory_hostname }}. This role talks to the Kubernetes API, so it
+      has to run somewhere that has credentials for it — normally a
+      control-plane node. Set k3s_app_kubeconfig to point elsewhere.
+    quiet: true

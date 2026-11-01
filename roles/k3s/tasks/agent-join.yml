@@ -1,0 +1,15 @@
+---
+- name: "ALL | Wait for the cluster registration endpoint to be reachable from this node"
+  ansible.builtin.wait_for:
+    host: "{{ k3s_api_registration_address }}"
+    port: "{{ k3s_api_port | int }}"
+    timeout: "{{ k3s_wait_timeout | int }}"
+
+- name: "ALL | Start K3s so this worker node joins the cluster"
+  ansible.builtin.systemd_service:
+    name: "{{ k3s_service_name }}"
+    state: started
+  become: true
+
+- name: "ALL | Wait for this worker node to be Ready"
+  ansible.builtin.include_tasks: wait-node-ready.yml

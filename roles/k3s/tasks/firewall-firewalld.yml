@@ -1,0 +1,173 @@
+---
+# The firewall stays on. Pod and service traffic is allowed by trusting the
+# CIDRs and the CNI interfaces it arrives on — the approach upstream K3s
+# documents — and node-to-node control traffic gets explicit per-port rules
+# that depend on this node's role. Nothing here disables or weakens firewalld.
+#
+# See vars/main.yml for the full port matrix and what each port is for.
+
+- name: "RHEL | Ensure firewalld is installed"
+  ansible.builtin.package:
+    name: "{{ k3s_firewall_package }}"
+    state: present
+  become: true
+
+- name: "RHEL | Ensure firewalld is enabled and running"
+  ansible.builtin.systemd_service:
+    name: firewalld
+    state: started
+    enabled: true
+  become: true
+  when: k3s_firewall_manage_state | bool
+
+- name: "RHEL | Allow SSH so the firewall can never lock this node out"
+  ansible.posix.firewalld:
+    port: "{{ k3s_firewall_ssh_port }}/tcp"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  when: k3s_firewall_ssh_sources | length == 0
+
+- name: "RHEL | Allow SSH from the management networks only"
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ item }} port port={{ k3s_firewall_ssh_port }} protocol=tcp accept"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_ssh_sources }}"
+
+# Pod-to-pod, pod-to-service and pod-to-node traffic all originates inside
+# these CIDRs. Trusting them is what lets a pod reach the API server and
+# CoreDNS without punching the whole pod network through the public zone.
+- name: "RHEL | Trust the pod and service networks so container traffic is not filtered"
+  ansible.posix.firewalld:
+    source: "{{ item }}"
+    zone: trusted
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_trusted_networks }}"
+
+# Added permanently only: cni0 and flannel.1 do not exist until K3s has started
+# for the first time, and firewalld binds an interface to its zone when the
+# interface appears or on reload.
+- name: "RHEL | Trust the CNI interfaces so overlay traffic is not filtered"
+  ansible.posix.firewalld:
+    interface: "{{ item }}"
+    zone: trusted
+    permanent: true
+    immediate: false
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_trusted_interfaces }}"
+  notify: "reload firewalld"
+
+- name: "RHEL | Allow the cluster-internal TCP ports from the other cluster nodes"
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ item.1 }} port port={{ item.0 }} protocol=tcp accept"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_cluster_tcp_ports | product(k3s_firewall_node_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/tcp from {{ item.1 }}"
+
+- name: "RHEL | Allow the cluster-internal UDP ports from the other cluster nodes"
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ item.1 }} port port={{ item.0 }} protocol=udp accept"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_cluster_udp_ports | product(k3s_firewall_node_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/udp from {{ item.1 }}"
+
+- name: "RHEL | Allow the Kubernetes API from anywhere for kubectl users"
+  ansible.posix.firewalld:
+    port: "{{ k3s_api_port }}/tcp"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  when:
+    - k3s_node_role == 'control-plane'
+    - k3s_firewall_api_sources | length == 0
+
+- name: "RHEL | Allow the Kubernetes API from the management networks only"
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ item }} port port={{ k3s_api_port }} protocol=tcp accept"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_api_sources }}"
+  when: k3s_node_role == 'control-plane'
+
+# MetalLB announces the ingress address from one node at a time and that node
+# can be any of them, so every node needs the ingress ports open.
+- name: "RHEL | Allow the ingress ports from anywhere"
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_ingress_ports }}"
+  when:
+    - k3s_traefik_enabled | bool
+    - k3s_firewall_ingress_sources | length == 0
+
+- name: "RHEL | Allow the ingress ports from the permitted networks only"
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ item.1 }} port port={{ item.0 }} protocol=tcp accept"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_ingress_ports | product(k3s_firewall_ingress_sources) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/tcp from {{ item.1 }}"
+  when: k3s_traefik_enabled | bool
+
+- name: "RHEL | Allow the NodePort range"
+  ansible.posix.firewalld:
+    port: "{{ k3s_firewall_nodeport_range }}/tcp"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  when: k3s_firewall_nodeport_enabled | bool
+
+- name: "RHEL | Allow the extra TCP ports this deployment asks for"
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_extra_tcp_ports }}"
+
+- name: "RHEL | Allow the extra UDP ports this deployment asks for"
+  ansible.posix.firewalld:
+    port: "{{ item }}/udp"
+    zone: "{{ k3s_firewall_zone | default(omit, true) }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  loop: "{{ k3s_firewall_extra_udp_ports }}"

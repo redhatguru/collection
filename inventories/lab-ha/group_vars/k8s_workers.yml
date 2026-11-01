@@ -1,0 +1,5 @@
+---
+# Workers run no etcd and no API server, so they need less of everything. The
+# preflight thresholds are per-group for exactly this reason.
+k3s_preflight_min_cpu: 2
+k3s_preflight_min_memory_mb: 1024

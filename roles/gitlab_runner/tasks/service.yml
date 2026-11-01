@@ -1,0 +1,22 @@
+---
+# What makes this host take jobs again after a reboot.
+#
+# Both packages enable their units at install time, and the role's handlers
+# enable them when they restart something — but a handler only fires on a
+# change, so on a host where someone disabled a unit nothing here would have
+# noticed. These two tasks make the guarantee the role's own.
+
+- name: "ALL | Ensure the runner starts at boot"
+  ansible.builtin.systemd_service:
+    name: "{{ gitlab_runner_service_name }}"
+    state: started
+    enabled: true
+  become: true
+
+- name: "ALL | Ensure Docker starts at boot"
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+  become: true
+  when: gitlab_runner_executor == 'docker'

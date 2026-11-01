@@ -1,0 +1,81 @@
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+#
+# A default-deny policy on its own breaks every namespace it touches: pods lose
+# DNS first and then everything that depends on resolving a name. So each
+# namespace gets the deny plus the allow-rules that keep it functional, and
+# never one without the other. kube-system is deliberately not in this list —
+# denying traffic there takes the cluster down.
+{% for namespace in k3s_network_policy_namespaces %}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: "{{ namespace }}"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: "{{ namespace }}"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: "{{ namespace }}"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "{{ k3s_network_policy_ingress_namespace }}"
+{% if k3s_network_policy_allow_api_server | bool %}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-egress
+  namespace: "{{ namespace }}"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # The API server is reached through its ClusterIP, which lives in the
+    # service CIDR rather than behind any pod selector.
+    - to:
+        - ipBlock:
+            cidr: "{{ k3s_service_cidr }}"
+      ports:
+        - protocol: TCP
+          port: {{ k3s_api_port | int }}
+        - protocol: TCP
+          port: 443
+{% endif %}
+{% endfor %}

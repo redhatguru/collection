@@ -1,0 +1,307 @@
+---
+# Verifies the cluster the way an operator would check it, from the bootstrap
+# node: nodes Ready, add-ons healthy, the ingress reachable on its load-balancer
+# address, the firewall still on, and the hardening actually enforcing — the
+# last one by trying to do something it is supposed to forbid.
+
+- name: Verify the cluster
+  hosts: k8s_control_plane[0]
+  gather_facts: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+  vars:
+    k3s_test_kubectl: /usr/local/bin/k3s kubectl
+    k3s_test_expected_nodes: "{{ groups['all'] | length }}"
+
+  tasks:
+    - name: Collect the node list
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - nodes
+          - -o
+          - 'jsonpath={range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status} {end}'
+      become: true
+      register: k3s_test_nodes
+      changed_when: false
+
+    - name: Assert every node joined and is Ready
+      ansible.builtin.assert:
+        that:
+          - k3s_test_nodes.stdout.split() | length == k3s_test_expected_nodes | int
+          - k3s_test_nodes.stdout.split() | reject('search', '=True$') | list | length == 0
+        fail_msg: "Expected {{ k3s_test_expected_nodes }} Ready nodes, got: {{ k3s_test_nodes.stdout }}"
+
+    - name: Collect the state of the cluster add-ons
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - deployment
+          - "{{ item.name }}"
+          - -n
+          - "{{ item.namespace }}"
+          - -o
+          - 'jsonpath={.status.conditions[?(@.type=="Available")].status}'
+      become: true
+      register: k3s_test_addons
+      changed_when: false
+      loop:
+        - {namespace: kube-system, name: coredns}
+        - {namespace: kube-system, name: metrics-server}
+        - {namespace: traefik, name: traefik}
+        - {namespace: metallb-system, name: metallb-controller}
+      loop_control:
+        label: "{{ item.namespace }}/{{ item.name }}"
+
+    - name: Assert CoreDNS, metrics-server, Traefik and MetalLB are all available
+      ansible.builtin.assert:
+        that:
+          - item.stdout == 'True'
+        fail_msg: "{{ item.item.namespace }}/{{ item.item.name }} is not Available"
+      loop: "{{ k3s_test_addons.results }}"
+      loop_control:
+        label: "{{ item.item.namespace }}/{{ item.item.name }}"
+
+    - name: Collect the MetalLB speaker daemonset state
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - daemonset
+          - metallb-speaker
+          - -n
+          - metallb-system
+          - -o
+          - 'jsonpath={.status.numberReady}/{.status.desiredNumberScheduled}'
+      become: true
+      register: k3s_test_speaker
+      changed_when: false
+
+    - name: Assert a MetalLB speaker runs on every eligible node
+      ansible.builtin.assert:
+        that:
+          - k3s_test_speaker.stdout | split('/') | first == k3s_test_speaker.stdout | split('/') | last
+          - k3s_test_speaker.stdout | split('/') | first | int > 0
+        fail_msg: "MetalLB speaker readiness is {{ k3s_test_speaker.stdout }}"
+
+    - name: Collect the address MetalLB assigned to the ingress
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - service
+          - traefik
+          - -n
+          - traefik
+          - -o
+          - "jsonpath={.status.loadBalancer.ingress[0].ip}"
+      become: true
+      register: k3s_test_ingress_ip
+      changed_when: false
+
+    - name: Assert MetalLB handed out the requested ingress address
+      ansible.builtin.assert:
+        that:
+          - k3s_test_ingress_ip.stdout == k3s_test_subnet_prefix ~ '.100'
+        fail_msg: >-
+          Expected the ingress on {{ k3s_test_subnet_prefix }}.100, got
+          '{{ k3s_test_ingress_ip.stdout }}'
+
+    - name: Fetch the example application through the ingress by hostname
+      ansible.builtin.uri:
+        url: "http://{{ k3s_test_ingress_ip.stdout }}/"
+        headers:
+          Host: hello.example.local
+        return_content: true
+        status_code: [200]
+      register: k3s_test_ingress_response
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: k3s_test_ingress_response.status | default(0) == 200
+
+    - name: Assert the response really came from the example application
+      ansible.builtin.assert:
+        that:
+          - "'nginx' in k3s_test_ingress_response.content | lower"
+        fail_msg: "The ingress answered, but not with the example application's page"
+
+    - name: Assert an unknown hostname is not served by the ingress
+      ansible.builtin.uri:
+        url: "http://{{ k3s_test_ingress_ip.stdout }}/"
+        headers:
+          Host: nothing-here.example.local
+        status_code: [404]
+      changed_when: false
+
+    - name: Collect the NetworkPolicies protecting the example application
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - get
+          - networkpolicy
+          - -n
+          - hello
+          - -o
+          - 'jsonpath={range .items[*]}{.metadata.name} {end}'
+      become: true
+      register: k3s_test_netpol
+      changed_when: false
+
+    - name: Assert the default-deny policy and its allow-rules are both in place
+      ansible.builtin.assert:
+        that:
+          - "'hello-default-deny' in k3s_test_netpol.stdout"
+          - "'hello-allow-dns' in k3s_test_netpol.stdout"
+          - "'hello-allow-ingress' in k3s_test_netpol.stdout"
+        fail_msg: "NetworkPolicies in the hello namespace: {{ k3s_test_netpol.stdout }}"
+
+    # The hardening has to be shown to refuse something, not just to be
+    # configured. A privileged pod is exactly what the "restricted" Pod
+    # Security Standard on an application namespace exists to stop.
+    - name: Try to create a privileged pod in the application namespace
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/k3s
+          - kubectl
+          - run
+          - pod-security-probe
+          - -n
+          - hello
+          - --image=busybox:1.36
+          - --restart=Never
+          - --privileged
+          - --command
+          - --
+          - /bin/true
+      become: true
+      register: k3s_test_privileged_pod
+      changed_when: false
+      failed_when: false
+
+    - name: Assert Pod Security Admission refused the privileged pod
+      ansible.builtin.assert:
+        that:
+          - k3s_test_privileged_pod.rc != 0
+          - "'violates PodSecurity' in k3s_test_privileged_pod.stderr"
+        fail_msg: >-
+          A privileged pod was accepted into the hello namespace. Pod Security
+          Admission is not enforcing. Output:
+          {{ k3s_test_privileged_pod.stderr | default('') }}
+
+    - name: Check that Secret encryption at rest is active
+      ansible.builtin.command:
+        argv: [/usr/local/bin/k3s, secrets-encrypt, status]
+      become: true
+      register: k3s_test_secrets_encrypt
+      changed_when: false
+
+    - name: Assert Secrets are encrypted in the datastore
+      ansible.builtin.assert:
+        that:
+          - "'Encryption Status: Enabled' in k3s_test_secrets_encrypt.stdout"
+        fail_msg: "{{ k3s_test_secrets_encrypt.stdout }}"
+
+    - name: Check that the API server is writing an audit log
+      ansible.builtin.stat:
+        path: /var/lib/rancher/k3s/server/logs/audit.log
+      become: true
+      register: k3s_test_audit_log
+
+    - name: Assert the audit log exists and has entries
+      ansible.builtin.assert:
+        that:
+          - k3s_test_audit_log.stat.exists
+          - k3s_test_audit_log.stat.size > 0
+        fail_msg: "No API server audit log at /var/lib/rancher/k3s/server/logs/audit.log"
+
+- name: Verify the host-level hardening on every node
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: Assert swap is off
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['swaptotal_mb'] | int == 0
+        fail_msg: "{{ inventory_hostname }} still has {{ ansible_facts['swaptotal_mb'] }} MB of swap"
+
+    - name: Check the state of the host firewall
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ 'firewalld' if ansible_facts['os_family'] == 'RedHat' else 'ufw' }}"]
+      register: k3s_test_firewall
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the host firewall is still running
+      ansible.builtin.assert:
+        that:
+          - k3s_test_firewall.stdout | trim == 'active'
+        fail_msg: >-
+          The firewall on {{ inventory_hostname }} is
+          '{{ k3s_test_firewall.stdout | trim }}'. This role must never
+          disable it to make Kubernetes work.
+
+    - name: Check the permissions on the Kubernetes credentials
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      become: true
+      register: k3s_test_credentials
+      loop:
+        - /etc/rancher/k3s/config.yaml
+        - /etc/rancher/k3s/token
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert the Kubernetes credentials are readable by root only
+      ansible.builtin.assert:
+        that:
+          - item.stat.mode == '0600'
+          - item.stat.pw_name == 'root'
+        fail_msg: "{{ item.item }} is {{ item.stat.mode | default('missing') }}, expected 0600 owned by root"
+      loop: "{{ k3s_test_credentials.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Check that the kernel modules the CNI needs are loaded
+      ansible.builtin.command:
+        argv: [lsmod]
+      register: k3s_test_lsmod
+      changed_when: false
+
+    - name: Assert br_netfilter and overlay are loaded
+      ansible.builtin.assert:
+        that:
+          - "'br_netfilter' in k3s_test_lsmod.stdout"
+          - "'overlay' in k3s_test_lsmod.stdout"
+        fail_msg: "br_netfilter and overlay must both be loaded"
+
+    - name: Check the sysctl values Kubernetes networking depends on
+      ansible.builtin.command:
+        argv: [sysctl, -n, "{{ item }}"]
+      register: k3s_test_sysctl
+      changed_when: false
+      loop:
+        - net.ipv4.ip_forward
+        - net.bridge.bridge-nf-call-iptables
+        - vm.panic_on_oom
+        - kernel.panic_on_oops
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert the forwarding and kubelet sysctl values are as configured
+      ansible.builtin.assert:
+        that:
+          - k3s_test_sysctl.results[0].stdout | trim == '1'
+          - k3s_test_sysctl.results[1].stdout | trim == '1'
+          - k3s_test_sysctl.results[2].stdout | trim == '0'
+          - k3s_test_sysctl.results[3].stdout | trim == '1'
+        fail_msg: "{{ k3s_test_sysctl.results | map(attribute='stdout') | list }}"

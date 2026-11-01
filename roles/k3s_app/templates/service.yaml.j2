@@ -1,0 +1,38 @@
+---
+# Managed by redhatguru.general.k3s_app
+#
+# ClusterIP by default. An application reached through the ingress needs
+# nothing else: a NodePort would open a port on every node and a LoadBalancer
+# would consume an address from the MetalLB pool for a hostname Traefik can
+# already route on its own.
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{ k3s_app_item.name }}"
+  namespace: "{{ k3s_app_item.namespace }}"
+  labels:
+    app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/managed-by: ansible
+{% if (k3s_app_item.service.annotations | default({})) | length > 0 %}
+  annotations:
+{% for key, value in k3s_app_item.service.annotations.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+{% endif %}
+spec:
+  type: "{{ k3s_app_item.service.type | default('ClusterIP') }}"
+  selector:
+    app.kubernetes.io/name: "{{ k3s_app_item.name }}"
+    app.kubernetes.io/instance: "{{ k3s_app_item.name }}"
+  ports:
+    - name: "{{ k3s_app_item.service.name | default('http') }}"
+      port: {{ k3s_app_item.service.port | int }}
+      targetPort: "{{ k3s_app_item.service.target_port | default('http') }}"
+      protocol: "{{ k3s_app_item.service.protocol | default('TCP') }}"
+{% for port in k3s_app_item.service.extra_ports | default([]) %}
+    - name: "{{ port.name }}"
+      port: {{ port.port | int }}
+      targetPort: "{{ port.target_port | default(port.name) }}"
+      protocol: "{{ port.protocol | default('TCP') }}"
+{% endfor %}

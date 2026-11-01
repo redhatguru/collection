@@ -1,5 +1,5 @@
 ---
-- name: Create PostgreSQL users
+- name: "ALL | Create PostgreSQL users"
   community.general.postgresql_user:
     name: "{{ item.name }}"
     password: "{{ item.password }}"
@@ -10,7 +10,7 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Grant all privileges on database to users
+- name: "ALL | Grant all privileges on database to users"
   community.postgresql.postgresql_privs:
     db: "{{ postgresql_database_name }}"
     privs: ALL

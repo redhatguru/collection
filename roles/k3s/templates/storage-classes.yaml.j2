@@ -1,0 +1,26 @@
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+{% for class in k3s_storage_extra_classes %}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: "{{ class.name }}"
+{% if class.is_default | default(false) | bool %}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+{% endif %}
+provisioner: "{{ class.provisioner }}"
+reclaimPolicy: "{{ class.reclaim_policy | default('Delete') }}"
+volumeBindingMode: "{{ class.volume_binding_mode | default('WaitForFirstConsumer') }}"
+allowVolumeExpansion: {{ class.allow_volume_expansion | default(true) | bool | lower }}
+{% if class.parameters | default({}) | length > 0 %}
+parameters:
+{{ class.parameters | to_nice_yaml(indent=2) | trim | indent(2, true) }}
+{% endif %}
+{% if class.mount_options | default([]) | length > 0 %}
+mountOptions:
+{% for option in class.mount_options %}
+  - "{{ option }}"
+{% endfor %}
+{% endif %}
+{% endfor %}

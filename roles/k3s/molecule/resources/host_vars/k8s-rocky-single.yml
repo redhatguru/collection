@@ -1,0 +1,15 @@
+---
+# Per-instance test settings. These live in a linked directory rather than
+# inline in molecule.yml because molecule treats provisioner.inventory.links
+# as a replacement for the inline host_vars/group_vars, not an addition — see
+# molecule.provisioner.ansible.Ansible.manage_inventory. Setting both silently
+# drops the inline half.
+k3s_test_subnet_prefix: "10.10.22"
+
+# cert-manager is covered by the two single-node scenarios; the HA scenario
+# leaves it out to keep four VMs within reach.
+k3s_cert_manager_enabled: true
+k3s_cert_manager_issuers:
+  - name: internal-ca
+    type: ca
+    ca_common_name: "Molecule Root CA"

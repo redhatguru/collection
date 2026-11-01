@@ -1,0 +1,95 @@
+---
+# A GitLab Omnibus install on one Ubuntu host: check the host can carry it,
+# add the official repository, install the pinned release, render the whole
+# configuration from variables, schedule the backups, then prove the instance
+# works.
+#
+# Backing up and upgrading are separate entry points at the bottom of this
+# file rather than part of a normal run. Both are tagged never, so a
+# configuration run can never replace the package or interrupt the instance to
+# take a backup — see tasks/upgrade.yml for why that ordering matters.
+#
+# Imported rather than included: tags on an include_tasks stop at the include
+# itself, so `--tags config` would reach it and then skip every task inside.
+
+- name: "ALL | Verify this host meets GitLab's requirements"
+  ansible.builtin.import_tasks: preflight.yml
+  tags: preflight
+  when: gitlab_preflight_enabled | bool
+
+- name: "ALL | Prepare the operating system for the GitLab package"
+  ansible.builtin.import_tasks: os.yml
+  tags: os
+
+- name: "ALL | Ensure the official GitLab package repository is available"
+  ansible.builtin.import_tasks: repository.yml
+  tags: repository
+
+- name: "ALL | Ensure GitLab is installed"
+  ansible.builtin.import_tasks: install.yml
+  tags: install
+
+# After the package and before GitLab serves anything: the host gets its
+# firewall before there is a port listening on it, and nothing is mid-download
+# when the ruleset is rebuilt.
+- name: "ALL | Open the host firewall for exactly the ports this instance serves"
+  ansible.builtin.import_tasks: firewall.yml
+  tags: firewall
+  when: gitlab_firewall_enabled | bool
+
+# Before configure.yml on purpose: nginx will not start without the
+# certificate gitlab.rb points it at.
+- name: "ALL | Ensure the self-signed TLS certificate exists"
+  ansible.builtin.import_tasks: tls.yml
+  tags: tls
+  when: gitlab_tls_self_signed_in_use | bool
+
+- name: "ALL | Ensure the GitLab configuration matches the role's variables"
+  ansible.builtin.import_tasks: configure.yml
+  tags: config
+
+# Flushed here rather than at the end of the play: everything below this point
+# talks to a running GitLab, and it has to be a GitLab running the
+# configuration this run just wrote.
+- name: "ALL | Apply any pending GitLab reconfigure before using the instance"
+  ansible.builtin.meta: flush_handlers
+  tags: always
+
+# After the configuration has been applied, because the unit only exists once
+# the package is installed and only supervises something once GitLab has been
+# reconfigured.
+- name: "ALL | Ensure GitLab comes back by itself after a reboot"
+  ansible.builtin.import_tasks: service.yml
+  tags: service
+  when: gitlab_service_enabled | bool
+
+- name: "ALL | Ensure the GitLab backups are scheduled"
+  ansible.builtin.import_tasks: backup.yml
+  tags: backup-schedule
+  when: gitlab_backup_enabled | bool
+
+- name: "ALL | Verify the instance is healthy and serving"
+  ansible.builtin.import_tasks: validate.yml
+  tags: validate
+  when: gitlab_validate_enabled | bool
+
+- name: "ALL | Print the GitLab report"
+  ansible.builtin.import_tasks: report.yml
+  tags: report
+
+# Opt-in entry point: `--tags backup` takes a backup of a running instance and
+# does nothing else.
+- name: "ALL | Take a backup of this instance now"
+  ansible.builtin.import_tasks: backup-create.yml
+  tags: [backup, never]
+
+# Opt-in entry point: `--tags reboot-test` reboots the host and proves GitLab
+# returns without help.
+- name: "ALL | Reboot this host and verify GitLab comes back"
+  ansible.builtin.import_tasks: reboot-test.yml
+  tags: [reboot-test, never]
+
+# Opt-in twice over: `--tags upgrade` and gitlab_upgrade_enabled.
+- name: "ALL | Upgrade this instance to the pinned release"
+  ansible.builtin.import_tasks: upgrade.yml
+  tags: [upgrade, never]

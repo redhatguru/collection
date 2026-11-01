@@ -1,12 +1,18 @@
 ---
-- name: Install K3s
-  hosts: k3s
-  become: true
-  vars:
-    k3s_version: "v1.28.6+k3s2"
-    k3s_kubernetes_version: "v1.30"
+# Builds the cluster described by the inventory. The same play produces a
+# single node, a single control plane with workers, or an HA control plane —
+# the role derives which from the group membership, so nothing here changes
+# between the three.
+#
+# The play must target every node of the cluster at once: the firewall rules
+# and the API registration address are derived from the other nodes' facts.
+# Running it with --limit is rejected by the role's preflight checks.
+#
+# become is set per task inside the role rather than for the whole play, so
+# the tasks that do not need root do not get it.
+- name: Install, configure and harden the Kubernetes cluster
+  hosts: k8s_control_plane:k8s_workers
+  gather_facts: true
 
-  tasks:
-    - name: K3s
-      ansible.builtin.include_role:
-        name: redhatguru.general.k3s
+  roles:
+    - role: redhatguru.general.k3s

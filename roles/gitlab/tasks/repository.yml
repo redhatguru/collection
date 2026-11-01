@@ -1,0 +1,69 @@
+---
+# The official instructions pipe a shell script from packages.gitlab.com into
+# bash. This does what the script does — install the signing key and the apt
+# source — without running anything downloaded, and leaves both as managed
+# files that are visible in a diff.
+
+# deb822_repository is implemented on top of the python-debian library and
+# refuses to run without it. Installed here rather than with the GitLab
+# prerequisites in os.yml, so that this file stands on its own — it is also
+# used directly (tasks_from: repository.yml) to add the repository without
+# installing anything else.
+- name: "DEBIAN | Ensure the library the apt source is managed with is installed"
+  ansible.builtin.apt:
+    name: python3-debian
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: "DEBIAN | Ensure the keyring directory for third-party apt repositories exists"
+  ansible.builtin.file:
+    path: "{{ gitlab_apt_keyring_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+# Kept in /etc/apt/keyrings and referenced from this one source with
+# signed-by, so the key can only ever vouch for GitLab's own packages — a key
+# in the global trust store vouches for every repository on the host.
+- name: "DEBIAN | Ensure the GitLab package signing key is installed"
+  ansible.builtin.get_url:
+    url: "{{ gitlab_repository_gpg_key_url }}"
+    dest: "{{ gitlab_apt_keyring_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: gitlab_repository_key
+
+# deb822_repository rather than apt_repository: the latter is deprecated and
+# is removed in ansible-core 2.25. The deb822 format also keeps the source
+# readable — one field per line in
+# /etc/apt/sources.list.d/{{ gitlab_apt_repository_filename }}.sources —
+# instead of one long bracketed line.
+- name: "DEBIAN | Ensure the GitLab package repository is configured"
+  ansible.builtin.deb822_repository:
+    name: "{{ gitlab_apt_repository_filename }}"
+    types: [deb]
+    uris: "{{ gitlab_repository_url }}"
+    suites: "{{ gitlab_repository_suite }}"
+    components: "{{ gitlab_repository_components }}"
+    architectures: "{{ gitlab_repository_architecture }}"
+    signed_by: "{{ gitlab_apt_keyring_file }}"
+    enabled: true
+    state: present
+  become: true
+  register: gitlab_repository_source
+
+# deb822_repository does not refresh the package lists itself, and the apt
+# tasks that follow allow a cache up to an hour old — so without this an apt
+# cache populated minutes before this repository existed would be used, and
+# the GitLab package would appear not to exist.
+- name: "DEBIAN | Refresh the package lists so the GitLab repository is readable"
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  when: gitlab_repository_source is changed or gitlab_repository_key is changed

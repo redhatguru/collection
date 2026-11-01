@@ -1,0 +1,43 @@
+---
+# Deliberately short. The full listings are behind k3s_debug so a
+# normal run stays readable, and nothing here prints a token or a kubeconfig.
+
+- name: "ALL | Print the cluster report"
+  ansible.builtin.debug:
+    msg:
+      - "Topology            : {{ k3s_topology }}"
+      - "K3s release         : {{ k3s_release | default('unknown') }}"
+      - "Control-plane nodes : {{ k3s_control_plane_hosts | join(', ') }}"
+      - "Worker nodes        : {{ k3s_worker_hosts | join(', ') | default('none', true) }}"
+      - "API endpoint        : https://{{ k3s_api_registration_address }}:{{ k3s_api_port }}"
+      - "Ingress address     : {{ k3s_ingress_address | default('not assigned') }}"
+      - "Ingress class       : {{ k3s_traefik_ingress_class if k3s_traefik_enabled | bool else 'none' }}"
+      - "Datastore           : {{ 'embedded etcd' if k3s_cluster_init | bool else 'sqlite' }}"
+      - "etcd snapshots      : {{ k3s_etcd_backup_schedule if k3s_etcd_backup_enabled | bool else 'disabled' }}"
+      - "Pod security        : enforce={{ k3s_pod_security_enforce }} audit={{ k3s_pod_security_audit }}"
+      - "Host firewall       : {{ k3s_firewall_backend_name | default('disabled') }}"
+      - "kubectl             : sudo {{ k3s_binary }} kubectl get nodes"
+      - "Point DNS for every application hostname at the ingress address above."
+
+- name: "ALL | Collect the full cluster state for the debug report"
+  ansible.builtin.command:
+    argv: ["{{ k3s_binary }}", kubectl, get, "{{ item }}", --all-namespaces, -o, wide]
+  environment:
+    KUBECONFIG: "{{ k3s_kubeconfig }}"
+  become: true
+  register: k3s_report_state
+  changed_when: false
+  loop:
+    - nodes
+    - pods
+    - services
+    - ingress
+  when: k3s_debug | bool
+
+- name: "ALL | Print the full cluster state"
+  ansible.builtin.debug:
+    msg: "{{ item.stdout_lines }}"
+  loop: "{{ k3s_report_state.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when: k3s_debug | bool

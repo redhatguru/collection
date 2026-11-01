@@ -1,0 +1,11 @@
+---
+# Managed by redhatguru.general.k3s — local edits are overwritten.
+#
+# RequestReceived is omitted everywhere: it doubles the volume of the log
+# without adding anything the ResponseComplete entry does not already say.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+{{ k3s_audit_policy_effective_rules | to_nice_yaml(indent=2) | trim }}

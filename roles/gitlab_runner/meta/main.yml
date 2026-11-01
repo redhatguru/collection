@@ -1,0 +1,30 @@
+---
+galaxy_info:
+  role_name: gitlab_runner
+  namespace: redhatguru
+  author: redhatguru
+  description: >-
+    Installs GitLab Runner and the Docker engine on Ubuntu, configures the
+    docker executor from role variables, and registers the runner to a GitLab
+    instance, group or project. Creates the runner through GitLab's API to
+    obtain its authentication token — registration tokens no longer exist —
+    installs the certificate of a GitLab no public CA signed for, and verifies
+    with GitLab that the runner is registered and that a job container can
+    actually start.
+  license: GPL-2.0-or-later
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+        - resolute
+  galaxy_tags:
+    - gitlab
+    - runner
+    - ci
+    - cicd
+    - docker
+    - devops
+
+dependencies: []

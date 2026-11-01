@@ -1,0 +1,24 @@
+---
+# The two destinations a restorable backup needs. Included by both backup.yml
+# (which also schedules the jobs) and backup-create.yml, so a backup taken
+# with --tags backup, or from the upgrade path with gitlab_backup_enabled
+# false, still has somewhere to write.
+
+- name: "ALL | Ensure the GitLab data backup directory exists and is private"
+  ansible.builtin.file:
+    path: "{{ gitlab_backup_path }}"
+    state: directory
+    # Written by the git account GitLab's own backup task runs as.
+    owner: git
+    group: root
+    mode: "0700"
+  become: true
+
+- name: "ALL | Ensure the GitLab configuration backup directory exists and is private"
+  ansible.builtin.file:
+    path: "{{ gitlab_backup_config_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
