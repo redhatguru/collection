@@ -5,3 +5,21 @@ releases:
     release_date: '2026-08-19'
     changes:
       release_summary: Initial release of the collection.
+  2.0.0:
+    release_date: '2026-11-03'
+    changes:
+      release_summary: >-
+        The postgresql role pins and holds its packages, creates several
+        databases with their users and extensions, and has a separate path for
+        major version upgrades.
+      breaking_changes:
+        - postgresql - postgresql_database_name and postgresql_users are replaced by postgresql_databases, which also holds each database's extensions.
+        - postgresql - postgresql_sslmode is removed. It was never used; set ssl through postgresql_settings.
+        - postgresql - postgresql_allow_subnet defaults to 127.0.0.1/32 instead of 0.0.0.0/0.
+        - postgresql - postgresql_root_password has to be set, and placeholder passwords are refused.
+        - postgresql - pg_hba.conf is rendered whole from variables, so edits on the host are overwritten.
+        - postgresql - Only a database's own users may connect to it, unless postgresql_database_private is false.
+      major_changes:
+        - postgresql - Add playbooks/postgresql-major-upgrade.yml and playbooks/postgresql-major-upgrade-cleanup.yml for upgrades with pg_upgrade.
+        - postgresql - Add postgresql_package_version to pin a minor release, and hold the packages.
+        - postgresql - Add playbooks/postgresql-install.yml and playbooks/postgresql-databases.yml as separate entry points.
