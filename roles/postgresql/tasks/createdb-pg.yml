@@ -1,9 +1,19 @@
 ---
-- name: "ALL | Create a PostgreSQL database"
-  community.general.postgresql_db:
-    name: "{{ postgresql_database_name }}"
+# template0 because the encoding can differ from template1's, which PostgreSQL
+# only allows from there.
+- name: "ALL | Ensure the databases exist"
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    owner: "{{ item.owner | default(omit) }}"
+    encoding: "{{ item.encoding | default(postgresql_database_encoding) }}"
+    lc_collate: "{{ item.lc_collate | default(omit) }}"
+    lc_ctype: "{{ item.lc_ctype | default(omit) }}"
+    template: template0
+    port: "{{ postgresql_port | int }}"
     state: present
-    encoding: "UTF-8"
   become: true
   become_user: postgres
-...
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ postgresql_no_log | bool }}"

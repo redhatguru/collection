@@ -1,38 +1,196 @@
 ---
-# defaults file for postgres
+# defaults file for postgresql
+#
+# Everything in here is meant to be overridden from inventory, group_vars or
+# host_vars. Values the role derives itself live in vars/ instead.
+
+# --------------------------------------------------------------------------
+# Release
+# --------------------------------------------------------------------------
+
+# The major version. Changing it on a host that already runs another major is
+# refused, except by playbooks/postgresql-major-upgrade.yml.
 postgresql_version: "17"
+
+# The minor release to converge on, e.g. "17.10". The same value works on every
+# OS family, whatever revision suffix the packages carry there. Leave it empty
+# to install whatever the repository calls newest, and to leave an installed
+# host on the release it has.
+#
+# To update, raise this and run playbooks/postgresql-install.yml: the packages
+# are replaced and PostgreSQL is restarted. A lower value is refused.
+#
+# The apt repository only keeps the last few releases of a major, so an old pin
+# stops being installable on a new Ubuntu host. A host that has it keeps it.
+postgresql_package_version: ""
+
+# Hold the packages, so unattended-upgrades or a stray `apt upgrade` or
+# `dnf update` cannot restart the database on a release nobody chose.
+postgresql_package_hold: true
+
+# Packages an extension in postgresql_databases needs, such as pgvector:
+# "postgresql-17-pgvector" on Ubuntu, "pgvector_17" on Rocky Linux. The contrib
+# extensions (pg_trgm, btree_gist, ...) are installed already.
+postgresql_extra_packages: []
+
+# --------------------------------------------------------------------------
+# Package repository
+# --------------------------------------------------------------------------
+
+postgresql_apt_repository_url: "https://apt.postgresql.org/pub/repos/apt"
+postgresql_apt_repository_key_url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+postgresql_apt_repository_suite: "{{ ansible_facts['distribution_release'] }}-pgdg"
+postgresql_apt_repository_components: "main"
+
+postgresql_yum_repository_url: >-
+  https://download.postgresql.org/pub/repos/yum/{{ postgresql_version }}/redhat/rhel-{{
+  ansible_facts['distribution_major_version'] }}-{{ ansible_facts['architecture'] }}/
+postgresql_yum_repository_key_url: "https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL"
+
+# --------------------------------------------------------------------------
+# Paths
+# --------------------------------------------------------------------------
+
 postgresql_conf_dir: >-
   {{ '/var/lib/pgsql/' + postgresql_version + '/data'
      if ansible_facts['os_family'] == 'RedHat'
      else '/etc/postgresql/' + postgresql_version + '/main' }}
 postgresql_hba: "{{ postgresql_conf_dir }}/pg_hba.conf"
 postgresql_conf: "{{ postgresql_conf_dir }}/postgresql.conf"
-# Directory holding the pg_dump/psql/etc. client binaries, used by the
-# backup task. PGDG packages don't put these on PATH on RedHat family
-# hosts, so the full path is needed there.
+# PGDG packages don't put the client binaries on PATH on RedHat family hosts.
 postgresql_bin_dir: >-
   {{ '/usr/pgsql-' + postgresql_version + '/bin'
      if ansible_facts['os_family'] == 'RedHat'
      else '/usr/lib/postgresql/' + postgresql_version + '/bin' }}
-postgresql_port: "5432"
-postgresql_sslmode: "Disable"
-postgresql_root_password: "dbrootpass"
-# Application database users to create, each granted full privileges on
-# postgresql_database_name. Add more entries to create several users on
-# the same database.
-postgresql_users:
-  - name: dbuser
-    password: dbuser
-postgresql_database_name: "awx"
-postgresql_allow_subnet: "0.0.0.0/0"
 
-# Automatic backups (pg_dump, gzipped) of postgresql_database_name, via a
-# cron job owned by the postgres user.
+# --------------------------------------------------------------------------
+# Server configuration
+# --------------------------------------------------------------------------
+
+postgresql_port: 5432
+postgresql_listen_addresses: "*"
+
+# The method for password logins, and how passwords are stored. "scram-sha-256"
+# is PostgreSQL's own default: md5 is deprecated.
+postgresql_auth_method: "scram-sha-256"
+postgresql_password_encryption: "scram-sha-256"
+
+# Anything else postgresql.conf accepts. Rendered after the settings above into
+# conf.d/90-ansible.conf, so this is also how you override them:
+#   postgresql_settings:
+#     max_connections: 200
+#     shared_buffers: "1GB"
+#     log_connections: true
+#     shared_preload_libraries: "pg_stat_statements"
+postgresql_settings: {}
+
+# Who may log in over the network: one rule in pg_hba.conf and one firewall
+# rule. Loopback only until you say otherwise, because this role sets
+# listen_addresses to every interface.
+postgresql_allow_subnet: "127.0.0.1/32"
+
+# The network rules in pg_hba.conf. pg_hba.conf is rendered from these, after
+# the rules for local sockets and loopback, and edits on the host are
+# overwritten. database, user and method are optional:
+#   postgresql_hba_entries:
+#     - type: hostssl
+#       database: awx
+#       user: awx
+#       address: "10.0.0.0/24"
+postgresql_hba_entries:
+  - type: host
+    address: "{{ postgresql_allow_subnet }}"
+
+# Open postgresql_port for postgresql_allow_subnet in ufw or firewalld.
+postgresql_firewall_enabled: true
+
+# Password of the postgres superuser. A placeholder the role refuses to use:
+# set the real one from Ansible Vault.
+postgresql_root_password: "ChangeMe123!"
+
+# --------------------------------------------------------------------------
+# Databases
+# --------------------------------------------------------------------------
+
+# The databases to create, each with its users and the extensions to install
+# in it. `plugins` and `owner` are optional. `encoding` overrides
+# postgresql_database_encoding for one database, and has to fit the server's
+# locale: anything but UTF-8 usually also needs `lc_collate` and `lc_ctype`.
+#   postgresql_databases:
+#     - name: awx
+#       plugins:
+#         - pg_trgm
+#       users:
+#         - user: awx_test
+#           password: "{{ vault_awx_test_password }}"
+#         - user: management
+#           password: "{{ vault_management_password }}"
+#
+# Each user gets all privileges on its database and on the public schema. A
+# user is one account on the whole server, so one that appears under several
+# databases needs the same password in each. A database or user removed from
+# this list is left in place.
+postgresql_databases: []
+
+postgresql_database_encoding: "UTF-8"
+
+# Only a database's own users may connect to it. PostgreSQL's default is that
+# every user on the server may connect to every database.
+postgresql_database_private: true
+
+# Hide the tasks that handle passwords from the output. Switch this off for a
+# run where you need to see why one of them failed: it prints the passwords.
+postgresql_no_log: true
+
+# --------------------------------------------------------------------------
+# Backups
+# --------------------------------------------------------------------------
+
+# A gzipped pg_dump of every database in postgresql_databases, each from a cron
+# job of its own that runs as the postgres user.
+postgresql_backup_enabled: true
 postgresql_backup_dir: "/backup"
-# Cron schedule fields for the backup job; the defaults run it weekly,
-# Sunday at 02:00.
+# The defaults run weekly, on Sunday at 02:00.
 postgresql_backup_minute: "0"
 postgresql_backup_hour: "2"
 postgresql_backup_day: "*"
 postgresql_backup_month: "*"
 postgresql_backup_weekday: "0"
+# Days a dump is kept, by a daily job. 0 keeps every dump, and then the disk is
+# yours to watch.
+postgresql_backup_keep_days: 30
+
+# --------------------------------------------------------------------------
+# Major version upgrades
+# --------------------------------------------------------------------------
+
+# Guards on playbooks/postgresql-major-upgrade.yml and on
+# playbooks/postgresql-major-upgrade-cleanup.yml, which removes the old cluster.
+# The second is the point after which there is no way back but the dump.
+postgresql_major_upgrade_enabled: false
+postgresql_major_upgrade_cleanup_enabled: false
+
+# "copy" leaves the old cluster usable, so a failed upgrade can fall back to it,
+# and needs room for a second copy of the data. "link" is much faster and needs
+# no room, but once it has started the old cluster is gone: a failure then means
+# restoring the dump.
+postgresql_major_upgrade_mode: "copy"
+
+# A pg_dumpall of the whole server before anything is touched.
+postgresql_major_upgrade_backup_before: true
+postgresql_major_upgrade_backup_dir: "{{ postgresql_backup_dir }}"
+
+# Anything else pg_upgrade accepts, e.g. ["--jobs=4"].
+postgresql_major_upgrade_extra_arguments: []
+
+# Throw away a cluster of the new major version that an interrupted upgrade left
+# behind. Off, because the role cannot tell that from one holding real data.
+postgresql_major_upgrade_discard_target: false
+
+# --------------------------------------------------------------------------
+# Validation
+# --------------------------------------------------------------------------
+
+# How long to wait for PostgreSQL to answer after a restart.
+postgresql_validate_retries: 12
+postgresql_validate_delay: 5

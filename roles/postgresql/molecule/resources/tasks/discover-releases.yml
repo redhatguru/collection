@@ -1,0 +1,35 @@
+---
+# Resolved from what the repository offers, because the apt repository only
+# keeps the last few releases: a pin written down here would stop working.
+- name: "RHEL | Ask the repository which PostgreSQL releases it offers"
+  ansible.builtin.command:
+    argv: [dnf, --showduplicates, list, "postgresql{{ postgresql_version }}-server"]
+  become: true
+  register: postgresql_test_rpm_releases
+  changed_when: false
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Ask the repository which PostgreSQL releases it offers"
+  ansible.builtin.command:
+    argv: [apt-cache, madison, "postgresql-{{ postgresql_version }}"]
+  register: postgresql_test_deb_releases
+  changed_when: false
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Choose the release to install and the release to update to"
+  ansible.builtin.set_fact:
+    postgresql_test_initial_version: "{{ postgresql_test_releases[-2] }}"
+    postgresql_test_target_version: "{{ postgresql_test_releases[-1] }}"
+  vars:
+    postgresql_test_output: >-
+      {{ postgresql_test_rpm_releases.stdout
+         if ansible_facts['os_family'] == 'RedHat'
+         else postgresql_test_deb_releases.stdout }}
+    postgresql_test_releases: >-
+      {{ postgresql_test_output
+         | regex_findall('\s(' ~ postgresql_version ~ '\.[0-9]+)-')
+         | unique | community.general.version_sort | list }}
+
+- name: "ALL | Report the releases this test uses"
+  ansible.builtin.debug:
+    msg: "Installing {{ postgresql_test_initial_version }}, then updating to {{ postgresql_test_target_version }}"

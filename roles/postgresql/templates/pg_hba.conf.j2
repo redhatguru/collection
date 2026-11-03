@@ -1,0 +1,14 @@
+# Managed by redhatguru.general.postgresql — local edits are overwritten.
+
+# TYPE  DATABASE     USER      ADDRESS       METHOD
+
+# Peer on the socket is how this role itself logs in as postgres.
+local   all          postgres                peer
+local   all          all                     peer
+local   replication  all                     peer
+host    all          all       127.0.0.1/32  {{ postgresql_auth_method }}
+host    all          all       ::1/128       {{ postgresql_auth_method }}
+
+{% for entry in postgresql_hba_entries %}
+{{ entry.type | default('host') }}  {{ entry.database | default('all') }}  {{ entry.user | default('all') }}  {{ entry.address }}  {{ entry.method | default(postgresql_auth_method) }}
+{% endfor %}

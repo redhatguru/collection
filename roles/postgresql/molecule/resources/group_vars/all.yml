@@ -1,0 +1,54 @@
+---
+# Shared test configuration, loaded by the scenario's molecule.yml. Obviously not
+# secrets: these are in a public repository.
+
+postgresql_version: "17"
+postgresql_root_password: "molecule_root_pass"
+
+# Off the default port on purpose, to prove every task follows the variable,
+# SELinux included.
+postgresql_port: 5433
+postgresql_allow_subnet: "10.10.0.0/16"
+
+# One number, one string and one boolean, each checked in verify.yml.
+postgresql_settings:
+  max_connections: 150
+  log_line_prefix: "it's molecule"
+  log_connections: true
+
+# An extension that is not in contrib, so it needs a package of its own.
+postgresql_extra_packages: >-
+  {{ ['pgvector_' ~ postgresql_version]
+     if ansible_facts['os_family'] == 'RedHat'
+     else ['postgresql-' ~ postgresql_version ~ '-pgvector'] }}
+
+postgresql_backup_dir: "/var/backups/molecule-postgresql"
+
+postgresql_databases:
+  - name: molecule_shop
+    plugins:
+      - pg_trgm
+      - btree_gist
+      - vector
+    users:
+      - user: shop_app
+        password: "shop_app_pass"
+      - user: management
+        password: "management_pass"
+  # An empty plugins key, as in a variable written with nothing under it yet.
+  - name: molecule_awx
+    plugins:
+    owner: awx_owner
+    users:
+      - user: awx_owner
+        password: "awx_owner_pass"
+      - user: management
+        password: "management_pass"
+  # No plugins key at all, and a user with a hyphen in the name.
+  - name: molecule_plain
+    encoding: "LATIN1"
+    lc_collate: "C"
+    lc_ctype: "C"
+    users:
+      - user: plain-reader
+        password: "plain_reader_pass"

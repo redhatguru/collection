@@ -1,7 +1,9 @@
 ---
-- name: "ALL | Print database report"
+- name: "ALL | Print the database report"
   ansible.builtin.debug:
-    msg:
-      - "Database: {{ postgresql_database_name }}"
-      - "Users: {{ postgresql_users | map(attribute='name') | join(', ') }}"
-...
+    msg: >-
+      {{ item.name }}: users {{ item.users | map(attribute='user') | join(', ') }};
+      extensions {{ item.plugins | default([], true) | join(', ') | default('none', true) }}
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"

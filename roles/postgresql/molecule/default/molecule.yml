@@ -1,4 +1,8 @@
 ---
+# Every supported platform, installed at the release below the newest one and
+# then updated to the newest, which is what pinning is for. converge installs
+# and creates the databases, idempotence proves a second run changes nothing,
+# side_effect updates, and verify looks at the result after a reboot.
 dependency:
   name: galaxy
 driver:
@@ -11,6 +15,8 @@ platforms:
     box: bento/rockylinux-9
     memory: 2048
     cpus: 2
+    groups:
+      - postgresql
     instance_raw_config_args:
       - "vm.boot_timeout = 600"
     config_options:
@@ -19,6 +25,8 @@ platforms:
     box: bento/rockylinux-10
     memory: 2048
     cpus: 2
+    groups:
+      - postgresql
     instance_raw_config_args:
       - "vm.boot_timeout = 600"
     config_options:
@@ -27,6 +35,8 @@ platforms:
     box: bento/ubuntu-24.04
     memory: 2048
     cpus: 2
+    groups:
+      - postgresql
     instance_raw_config_args:
       - "vm.boot_timeout = 600"
     config_options:
@@ -35,6 +45,8 @@ platforms:
     box: bento/ubuntu-26.04
     memory: 2048
     cpus: 2
+    groups:
+      - postgresql
     instance_raw_config_args:
       - "vm.boot_timeout = 600"
     config_options:
@@ -44,9 +56,29 @@ provisioner:
   env:
     ANSIBLE_ROLES_PATH: "../../.."
   playbooks:
-    prepare: prepare.yml
+    prepare: ../resources/prepare.yml
+    converge: ../resources/converge.yml
+    side_effect: ../resources/side-effect.yml
+    verify: ../resources/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
 verifier:
   name: ansible
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy
 ansible:
   cfg:
     ssh_connection:

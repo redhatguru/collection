@@ -1,0 +1,52 @@
+---
+# SELinux refuses to let PostgreSQL bind any port but its own until told about it.
+- name: "RHEL | Ensure SELinux lets PostgreSQL listen on its port"
+  community.general.seport:
+    ports: "{{ postgresql_port }}"
+    proto: tcp
+    setype: postgresql_port_t
+    state: present
+  become: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['selinux']['status'] | default('disabled') == 'enabled'
+    - postgresql_port | int != 5432
+
+- name: "ALL | Ensure the directory for managed configuration exists"
+  ansible.builtin.file:
+    path: "{{ postgresql_conf_dir }}/conf.d"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0750"
+  become: true
+
+# Commented out in the RedHat packages' postgresql.conf, and already set in the
+# Debian ones. It comes last in both, so what it loads wins.
+- name: "ALL | Ensure postgresql.conf loads the managed configuration"
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf }}"
+    regexp: '^#?include_dir\s*='
+    line: "include_dir = 'conf.d'"
+  become: true
+  notify: "ALL | Restart PostgreSQL so the running server matches its packages and configuration"
+
+- name: "ALL | Ensure the server settings match the role's variables"
+  ansible.builtin.template:
+    src: postgresql.conf.j2
+    dest: "{{ postgresql_conf_dir }}/conf.d/90-ansible.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  become: true
+  notify: "ALL | Restart PostgreSQL so the running server matches its packages and configuration"
+
+- name: "ALL | Ensure pg_hba.conf matches the role's variables"
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgresql_hba }}"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  become: true
+  notify: "ALL | Restart PostgreSQL so the running server matches its packages and configuration"

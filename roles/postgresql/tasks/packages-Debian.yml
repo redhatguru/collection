@@ -1,0 +1,26 @@
+---
+# Past the hold when the pin moves, so the hold never has to be lifted and a
+# failed apt cannot leave the packages open to unattended-upgrades.
+- name: "DEBIAN | Ensure PostgreSQL is installed at the requested release"
+  ansible.builtin.apt:
+    name: "{{ postgresql_package_specs }}"
+    state: present
+    allow_change_held_packages: true
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  notify: "ALL | Restart PostgreSQL so the running server matches its packages and configuration"
+
+- name: "DEBIAN | Ensure the packages extensions need are installed"
+  ansible.builtin.apt:
+    name: "{{ postgresql_extra_packages }}"
+    state: present
+  become: true
+  when: postgresql_extra_packages | length > 0
+
+- name: "DEBIAN | Ensure the PostgreSQL packages are {{ 'held at their installed release' if postgresql_package_hold | bool else 'not held' }}"
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: "{{ 'hold' if postgresql_package_hold | bool else 'install' }}"
+  become: true
+  loop: "{{ postgresql_packages }}"

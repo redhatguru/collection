@@ -1,31 +1,10 @@
 ---
-- name: "ALL | Install Postgress"
-  ansible.builtin.import_tasks:
-    file: install-pg.yml
-  tags: install
+# The whole of it: the server, then whatever postgresql_databases asks for.
+# playbooks/postgresql-install.yml and playbooks/postgresql-databases.yml run
+# one half each.
+- name: "ALL | Ensure PostgreSQL is installed and configured"
+  ansible.builtin.import_tasks: server.yml
 
-- name: "ALL | Create Postgress Database"
-  ansible.builtin.import_tasks:
-    file: createdb-pg.yml
-  tags: createdb
-
-- name: "ALL | Create Postgres Users"
-  ansible.builtin.import_tasks:
-    file: createusr-pg.yml
-  tags: createusr
-
-- name: "ALL | Harden Postgres"
-  ansible.builtin.import_tasks:
-    file: hardening.yml
-  tags: hardening
-
-- name: "ALL | Configure automatic PostgreSQL backups"
-  ansible.builtin.import_tasks:
-    file: backup.yml
-  tags: backup
-
-- name: "ALL | Print database report"
-  ansible.builtin.import_tasks:
-    file: report.yml
-  tags: report
-...
+- name: "ALL | Ensure the databases, their users and their extensions exist"
+  ansible.builtin.import_tasks: databases.yml
+  when: postgresql_databases | length > 0

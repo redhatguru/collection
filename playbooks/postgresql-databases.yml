@@ -1,0 +1,29 @@
+---
+# Creates the databases in postgresql_databases, with their users and the
+# extensions they ask for, on hosts where PostgreSQL is already installed:
+#
+#   ansible-playbook -i inventories/lab-postgresql/hosts.yml playbooks/postgresql-databases.yml
+#
+#   postgresql_databases:
+#     - name: awx
+#       plugins:
+#         - pg_trgm
+#       users:
+#         - user: awx_test
+#           password: "{{ vault_awx_test_password }}"
+#         - user: management
+#           password: "{{ vault_management_password }}"
+#
+# Variables come from inventory, see
+# inventories/lab-postgresql/group_vars/postgresql.yml. become is set per task
+# inside the role.
+- name: Create the PostgreSQL databases, users and extensions
+  hosts: postgresql
+  gather_facts: true
+
+  tasks:
+    # Imported so that --tags reaches the tasks inside it.
+    - name: "ALL | Ensure the databases, their users and their extensions exist"
+      ansible.builtin.import_role:
+        name: redhatguru.general.postgresql
+        tasks_from: databases.yml

@@ -1,0 +1,25 @@
+---
+# Upgrades the hosts in the postgresql group to the major version in
+# postgresql_version, with pg_upgrade. The database is down for the duration.
+#
+#   ansible-playbook -i inventories/lab-postgresql/hosts.yml \
+#     playbooks/postgresql-major-upgrade.yml \
+#     -e postgresql_version=18 -e postgresql_major_upgrade_enabled=true
+#
+# Put the new postgresql_version in inventory as well once it has run. Packages in
+# postgresql_extra_packages have to be the ones for the new major version.
+#
+# The old cluster stays, stopped, as the way back. When you are sure of the new
+# one, playbooks/postgresql-major-upgrade-cleanup.yml removes it.
+#
+# serial: 1 means an upgrade that fails stops the run at that host.
+- name: Upgrade PostgreSQL to a new major version
+  hosts: postgresql
+  serial: 1
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Ensure the cluster runs the requested major version"
+      ansible.builtin.import_role:
+        name: redhatguru.general.postgresql
+        tasks_from: upgrade-major.yml

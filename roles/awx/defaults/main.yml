@@ -73,11 +73,10 @@ awx_ee_mem_limit: "4Gi"
 # the README.
 awx_image_version: ""
 
-# External PostgreSQL database AWX connects to. Defaults match the
-# postgresql role's own defaults (postgresql_database_name: "awx", first
-# entry of postgresql_users: name "dbuser") so the two roles work together
-# out of the box; awx_postgres_host has no generic default and normally
-# needs to be set to the host running the postgresql role.
+# External PostgreSQL database AWX connects to, normally an entry in the
+# postgresql role's postgresql_databases with a user of its own. These have to
+# match that entry; awx_postgres_host has no generic default and normally needs
+# to be set to the host running the postgresql role.
 awx_postgres_host: ""
 awx_postgres_port: 5432
 awx_postgres_database: "awx"

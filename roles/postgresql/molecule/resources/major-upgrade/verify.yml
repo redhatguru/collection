@@ -1,0 +1,288 @@
+---
+- name: Verify the upgraded cluster
+  hosts: all
+  gather_facts: true
+
+  vars:
+    postgresql_version: "18"
+    postgresql_test_rhel: "{{ ansible_facts['os_family'] == 'RedHat' }}"
+    postgresql_test_psql: "/usr/{{ 'pgsql-18/bin' if postgresql_test_rhel else 'lib/postgresql/18/bin' }}/psql"
+    postgresql_test_old_unit: "{{ 'postgresql-17' if postgresql_test_rhel else 'postgresql@17-main' }}"
+    postgresql_test_new_unit: "{{ 'postgresql-18' if postgresql_test_rhel else 'postgresql@18-main' }}"
+    postgresql_test_old_data: "{{ '/var/lib/pgsql/17/data' if postgresql_test_rhel else '/var/lib/postgresql/17/main' }}"
+
+  tasks:
+    - name: "ALL | Reboot the host before checking anything"
+      ansible.builtin.reboot:
+      become: true
+
+    - name: "ALL | Read the release and the row"
+      ansible.builtin.command:
+        argv:
+          - "{{ postgresql_test_psql }}"
+          - --port=5433
+          - --dbname=molecule_shop
+          - -tAc
+          - "SELECT current_setting('server_version_num'), name, embedding, current_setting('max_connections') FROM survivor"
+      become: true
+      become_user: postgres
+      register: postgresql_test_row
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: postgresql_test_row.rc == 0
+
+    - name: "ALL | Assert the new server came back with the data and the settings"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_row.stdout is match('^18[0-9]{4}\|still here\|\[1,2,3\]\|150$')
+        fail_msg: "{{ postgresql_test_row.stdout }}"
+
+    - name: "ALL | Log in over the network with a password from before the upgrade"
+      ansible.builtin.command:
+        argv:
+          - "{{ postgresql_test_psql }}"
+          - --host=127.0.0.1
+          - --port=5433
+          - --username=shop_app
+          - --dbname=molecule_shop
+          - -tAc
+          - SELECT count(*) FROM survivor
+      environment:
+        PGPASSWORD: shop_app_pass
+      register: postgresql_test_login
+      changed_when: false
+      failed_when: postgresql_test_login.rc != 0 and 'permission denied' not in postgresql_test_login.stderr
+
+    - name: "ALL | Check the state of the two servers' units"
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      register: postgresql_test_units
+      changed_when: false
+      failed_when: false
+      loop:
+        - "{{ postgresql_test_old_unit }}"
+        - "{{ postgresql_test_new_unit }}"
+
+    - name: "ALL | Check the old cluster is still there"
+      ansible.builtin.stat:
+        path: "{{ postgresql_test_old_data }}/PG_VERSION"
+      become: true
+      register: postgresql_test_old_cluster
+
+    - name: "ALL | Find the pre-upgrade dump"
+      ansible.builtin.find:
+        paths: /var/backups/molecule-postgresql
+        patterns: "pre-upgrade-17-to-18-*.sql"
+      become: true
+      register: postgresql_test_dumps
+
+    - name: "ALL | Read the dump that went with the successful run"
+      ansible.builtin.slurp:
+        src: "{{ (postgresql_test_dumps.files | sort(attribute='mtime') | last).path }}"
+      become: true
+      register: postgresql_test_dump
+
+    - name: "ALL | Assert the old server is down but intact, and the dump holds the data"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_units.results[0].stdout | trim != 'active'
+          - postgresql_test_units.results[1].stdout | trim == 'active'
+          - postgresql_test_old_cluster.stat.exists
+          - "'still here' in postgresql_test_dump.content | b64decode"
+
+    # Before anything else runs the role, because this is about what the upgrade
+    # itself left behind. Run the way cron would, not just read.
+    - name: "ALL | Read the scheduled backup job the upgrade left behind"
+      ansible.builtin.slurp:
+        src: /etc/cron.d/postgresql-backup-molecule_shop
+      become: true
+      register: postgresql_test_cron
+
+    - name: "ALL | Run that job against the new server"
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - >-
+            {{ (postgresql_test_cron.content | b64decode).splitlines()
+               | select('search', 'pg_dump') | first
+               | regex_replace('^.*postgres ', '') | replace('\%', '%') }}
+      become: true
+      become_user: postgres
+      register: postgresql_test_backup
+      changed_when: true
+
+    - name: "ALL | Assert the backup job uses the new pg_dump"
+      ansible.builtin.assert:
+        that:
+          - "'/18/' in postgresql_test_cron.content | b64decode or 'pgsql-18' in postgresql_test_cron.content | b64decode"
+          - "'/17/' not in postgresql_test_cron.content | b64decode"
+          - "'pgsql-17' not in postgresql_test_cron.content | b64decode"
+
+    - name: "ALL | Run the normal install again on the upgraded host"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: server.yml
+
+    - name: "ALL | Run the normal database tasks on the upgraded host"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: databases.yml
+
+    - name: "ALL | Run the upgrade again, which has nothing left to do"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: upgrade-major.yml
+      vars:
+        postgresql_major_upgrade_enabled: true
+
+    - name: "DEBIAN | Collect the dpkg selection of the new packages"
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Status}\n", postgresql-18, postgresql-client-18]
+      register: postgresql_test_holds
+      changed_when: false
+      when: not postgresql_test_rhel
+
+    - name: "DEBIAN | Assert the new packages are held"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_holds.stdout_lines | select('match', '^hold ok installed') | list | length == 2
+        fail_msg: "{{ postgresql_test_holds.stdout }}"
+      when: not postgresql_test_rhel
+
+    - name: "RHEL | Collect the package locks"
+      ansible.builtin.command:
+        argv: [dnf, versionlock, list]
+      become: true
+      register: postgresql_test_locks
+      changed_when: false
+      when: postgresql_test_rhel
+
+    - name: "RHEL | Assert the new packages are locked"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_locks.stdout_lines | select('search', 'postgresql18') | list | length == 4
+        fail_msg: "{{ postgresql_test_locks.stdout }}"
+      when: postgresql_test_rhel
+
+    # --------------------------------------------------------------------
+    # What the role has to refuse
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Try an upgrade without the guard"
+      block:
+        - name: "ALL | Ask for an upgrade with the guard off"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: upgrade-major.yml
+
+        - name: "ALL | Record that the role accepted it"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_guard: false
+      rescue:
+        - name: "ALL | Record that the role refused it"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_guard: true
+
+    - name: "ALL | Try to move back down a major version"
+      block:
+        - name: "ALL | Ask for the old major version"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: upgrade-major.yml
+          vars:
+            postgresql_version: "17"
+            postgresql_major_upgrade_enabled: true
+
+        - name: "ALL | Record that the role accepted it"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_down: false
+      rescue:
+        - name: "ALL | Record that the role refused it"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_down: true
+
+    - name: "ALL | Try a cleanup without the guard"
+      block:
+        - name: "ALL | Ask for a cleanup with the guard off"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: upgrade-major-cleanup.yml
+
+        - name: "ALL | Record that the role accepted it"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_cleanup: false
+      rescue:
+        - name: "ALL | Record that the role refused it"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_cleanup: true
+
+    - name: "ALL | Check the old cluster survived those attempts"
+      ansible.builtin.stat:
+        path: "{{ postgresql_test_old_data }}/PG_VERSION"
+      become: true
+      register: postgresql_test_old_cluster_after
+
+    - name: "ALL | Assert the role refused all of them"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_refused_guard
+          - postgresql_test_refused_down
+          - postgresql_test_refused_cleanup
+          - postgresql_test_old_cluster_after.stat.exists
+
+    # --------------------------------------------------------------------
+    # The cleanup
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Remove the old cluster"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: upgrade-major-cleanup.yml
+      vars:
+        postgresql_major_upgrade_cleanup_enabled: true
+
+    - name: "ALL | Check the old cluster is gone"
+      ansible.builtin.stat:
+        path: "{{ postgresql_test_old_data }}"
+      become: true
+      register: postgresql_test_old_gone
+
+    - name: "ALL | Collect the packages left on the host"
+      ansible.builtin.package_facts:
+        manager: "{{ 'rpm' if postgresql_test_rhel else 'apt' }}"
+
+    - name: "ALL | Run the backup job once more, with the old binaries gone"
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - >-
+            {{ (postgresql_test_cron.content | b64decode).splitlines()
+               | select('search', 'pg_dump') | first
+               | regex_replace('^.*postgres ', '') | replace('\%', '%') }}
+      become: true
+      become_user: postgres
+      changed_when: true
+
+    - name: "ALL | Read the row once more"
+      ansible.builtin.command:
+        argv: ["{{ postgresql_test_psql }}", --port=5433, --dbname=molecule_shop, -tAc, SELECT name FROM survivor]
+      become: true
+      become_user: postgres
+      register: postgresql_test_final
+      changed_when: false
+
+    - name: "ALL | Assert only the old cluster and its packages went away"
+      ansible.builtin.assert:
+        that:
+          - not postgresql_test_old_gone.stat.exists
+          - "'postgresql17-server' not in ansible_facts['packages']"
+          - "'postgresql-17' not in ansible_facts['packages']"
+          - postgresql_test_final.stdout == 'still here'
+
+    - name: "ALL | Run the normal install once more, now with one major version left"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: server.yml

@@ -1,0 +1,40 @@
+---
+- name: "RHEL | Ensure the packages the role needs are installed"
+  ansible.builtin.dnf:
+    name:
+      - acl
+      - cronie
+      - epel-release
+      - glibc-langpack-en
+      - openssl
+      - policycoreutils-python-utils
+      - python3-dnf-plugin-versionlock
+      - python3-libselinux
+      - python3-psycopg2
+    state: present
+  become: true
+
+- name: "RHEL | Ensure the PostgreSQL package signing key is trusted"
+  ansible.builtin.rpm_key:
+    key: "{{ postgresql_yum_repository_key_url }}"
+    state: present
+  become: true
+
+- name: "RHEL | Ensure the PostgreSQL package repository is configured"
+  ansible.builtin.yum_repository:
+    name: pgdg
+    description: PostgreSQL PGDG YUM repo
+    baseurl: "{{ postgresql_yum_repository_url }}"
+    enabled: true
+    gpgcheck: true
+    gpgkey: "{{ postgresql_yum_repository_key_url }}"
+  become: true
+
+# The distribution's module otherwise hides the PGDG packages. EL10 has no
+# modules any more.
+- name: "RHEL | Ensure the distribution's own PostgreSQL module is disabled"
+  ansible.builtin.command:
+    argv: [dnf, -qy, module, disable, postgresql]
+  become: true
+  changed_when: false
+  when: ansible_facts['distribution_major_version'] | int < 10

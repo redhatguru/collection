@@ -13,9 +13,12 @@
   hosts: postgresql
   become: true
   vars:
-    postgresql_database_name: awx
-    postgresql_user: dbuser
-    postgresql_user_password: dbuser
+    postgresql_databases:
+      - name: awx
+        users:
+          - user: dbuser
+            password: dbuser
+    postgresql_root_password: molecule_root_pass
     postgresql_allow_subnet: "10.10.13.0/24"
   tasks:
     - name: Include postgresql role

@@ -1,0 +1,66 @@
+---
+# Nothing here changes the host, and none of these loop: a failed loop item is
+# printed whole, and these items hold passwords.
+
+- name: "ALL | Ensure there are databases to create"
+  ansible.builtin.assert:
+    that:
+      - postgresql_databases | length > 0
+    fail_msg: >-
+      postgresql_databases is empty, so there is nothing to do. See
+      roles/postgresql/README.md for what an entry looks like.
+    quiet: true
+
+- name: "ALL | Ensure every database has a unique name and at least one user"
+  ansible.builtin.assert:
+    that:
+      - postgresql_databases | rejectattr('name', 'defined') | list | length == 0
+      - postgresql_databases | map(attribute='name') | unique | length == postgresql_databases | length
+      - postgresql_databases | rejectattr('users', 'defined') | list | length == 0
+      - postgresql_databases | rejectattr('users') | list | length == 0
+    fail_msg: >-
+      Every entry in postgresql_databases needs a name of its own and a list of
+      one or more users, each with `user` and `password`.
+    quiet: true
+
+- name: "ALL | Ensure every database user has a name and a real password"
+  ansible.builtin.assert:
+    that:
+      - postgresql_database_users | rejectattr('user', 'defined') | list | length == 0
+      - postgresql_database_users | rejectattr('password', 'defined') | list | length == 0
+      - postgresql_database_users | rejectattr('password') | list | length == 0
+      - postgresql_database_users | map(attribute='password') | intersect(postgresql_password_placeholders) | length == 0
+    fail_msg: >-
+      A user in postgresql_databases has no `user`, an empty `password`, or a
+      password that is still a placeholder. Keep real ones in Ansible Vault.
+    quiet: true
+
+# A user is one account on the server. Two passwords for it would change the
+# password on every run, and lock out whichever application had the other one.
+- name: "ALL | Ensure a user under several databases has one password"
+  ansible.builtin.assert:
+    that:
+      - postgresql_duplicate_users | length == 0
+    fail_msg: >-
+      {{ postgresql_duplicate_users | join(', ') }} appear under
+      several databases with different passwords. A user is one account on the
+      whole server: give it the same password everywhere.
+    quiet: true
+  vars:
+    postgresql_duplicate_users: >-
+      {{ postgresql_database_users | map(attribute='user') | community.general.counter
+         | dict2items | selectattr('value', 'gt', 1) | map(attribute='key') | list }}
+
+- name: "ALL | Check that PostgreSQL is installed on this host"
+  ansible.builtin.stat:
+    path: "{{ postgresql_bin_dir }}/psql"
+  register: postgresql_psql_binary
+
+- name: "ALL | Ensure PostgreSQL is installed on this host"
+  ansible.builtin.assert:
+    that:
+      - postgresql_psql_binary.stat.exists
+    fail_msg: >-
+      PostgreSQL {{ postgresql_version }} is not installed on
+      {{ inventory_hostname }}. Run playbooks/postgresql-install.yml first.
+    quiet: true

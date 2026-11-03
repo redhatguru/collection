@@ -1,0 +1,14 @@
+---
+# The selectattr drops a database with no plugins, or with an empty `plugins:`.
+- name: "ALL | Ensure each database has the extensions it asks for"
+  community.postgresql.postgresql_ext:
+    db: "{{ item.0.name }}"
+    name: "{{ item.1 }}"
+    port: "{{ postgresql_port | int }}"
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgresql_databases | selectattr('plugins', 'defined') | selectattr('plugins') | subelements('plugins') }}"
+  loop_control:
+    label: "{{ item.1 }} in {{ item.0.name }}"
+  no_log: "{{ postgresql_no_log | bool }}"

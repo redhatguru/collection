@@ -1,0 +1,28 @@
+---
+- name: Converge
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    # The repository has to exist before the test can ask it which releases
+    # exist. The role's own run below configures it again, idempotently.
+    - name: "ALL | Ensure the PostgreSQL package repository is available"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: "repository-{{ ansible_facts['os_family'] }}.yml"
+
+    - name: "ALL | Work out which releases this test run uses"
+      ansible.builtin.include_tasks: tasks/discover-releases.yml
+
+    # Through the two entry points the playbooks use, not main.yml.
+    - name: "ALL | Ensure PostgreSQL is installed at the release below the newest"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: server.yml
+      vars:
+        postgresql_package_version: "{{ postgresql_test_initial_version }}"
+
+    - name: "ALL | Ensure the databases, users and extensions exist"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: databases.yml

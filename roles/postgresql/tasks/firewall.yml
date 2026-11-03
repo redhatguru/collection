@@ -1,0 +1,20 @@
+---
+- name: "DEBIAN | Ensure ufw lets the permitted network reach PostgreSQL"
+  community.general.ufw:
+    rule: allow
+    port: "{{ postgresql_port | string }}"
+    proto: tcp
+    from_ip: "{{ postgresql_allow_subnet }}"
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Ensure firewalld lets the permitted network reach PostgreSQL"
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family='ipv4' source address='{{ postgresql_allow_subnet }}'
+      port protocol='tcp' port='{{ postgresql_port }}' accept
+    permanent: true
+    state: enabled
+    immediate: true
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
