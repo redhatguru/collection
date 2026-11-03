@@ -35,7 +35,7 @@ ansible-galaxy collection install -r requirements.yml
 
 | Role | Description | Supported platforms |
 | --- | --- | --- |
-| [`postgresql`](roles/postgresql) | Install and configure PostgreSQL, including database and user creation and `pg_hba.conf`/`postgresql.conf` hardening. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
+| [`postgresql`](roles/postgresql) | Install PostgreSQL at a pinned release and hold it there, configure the server from variables, and create databases with their users and extensions. | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`patching`](roles/patching) | Update all packages via `dnf`/`apt`, rebooting only when a reboot is actually required and explicitly allowed (`patching_reboot: true`). | Rocky Linux 9/10, Ubuntu 24.04/26.04 |
 | [`k3s`](roles/k3s) | Install, configure and harden a K3s cluster — single node, single control plane with workers, or an HA embedded-etcd control plane, all derived from the inventory. Includes OS preparation, a node-role aware firewall that stays enabled, CIS-style hardening, MetalLB, Traefik (HA), cert-manager, etcd snapshots, post-install validation and a rolling upgrade. | RHEL/Rocky/AlmaLinux 9+, Ubuntu 22.04+, Debian 12+ (x86_64, ARM64) |
 | [`k3s_app`](roles/k3s_app) | Deploy applications onto an existing cluster from a declarative definition — namespace, workload, Service, Ingress, ConfigMaps, Secrets, PVCs and NetworkPolicies — plus raw manifests and Helm releases. Restricted Pod Security Standards and a default-deny NetworkPolicy by default. | Any host with a kubeconfig for the cluster |
@@ -52,9 +52,12 @@ See each role's README for its full variable list and an example playbook.
 - `playbooks/` — `site.yml`, `k3s.yml`, `applications.yml` and
   `upgrade.yml` for the K3s roles, `gitlab.yml`, `gitlab-example.yml`,
   `gitlab-backup.yml`, `gitlab-upgrade.yml` and `gitlab-runner.yml` for GitLab,
+  `postgresql.yml`, `postgresql-install.yml`, `postgresql-databases.yml`,
+  `postgresql-major-upgrade.yml` and `postgresql-major-upgrade-cleanup.yml` for
+  PostgreSQL,
   plus other utility playbooks
 - `inventories/` — worked inventory examples (`lab-single-node`, `lab-ha`,
-  `lab-gitlab`)
+  `lab-gitlab`, `lab-postgresql`)
 - `plugins/` — custom modules, filters, and other plugins
 
 ## Testing

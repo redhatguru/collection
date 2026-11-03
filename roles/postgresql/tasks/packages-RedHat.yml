@@ -1,0 +1,35 @@
+---
+# Past the versionlock when the pin moves, so the lock never has to be lifted
+# and a failed dnf cannot leave the packages open to a stray `dnf update`.
+- name: "RHEL | Ensure PostgreSQL is installed at the requested release"
+  ansible.builtin.dnf:
+    name: "{{ postgresql_package_specs }}"
+    state: present
+    disable_plugin:
+      - versionlock
+  become: true
+  register: postgresql_packages_installed
+  notify: "ALL | Restart PostgreSQL so the running server matches its packages and configuration"
+
+- name: "RHEL | Ensure the packages extensions need are installed"
+  ansible.builtin.dnf:
+    name: "{{ postgresql_extra_packages }}"
+    state: present
+  become: true
+  when: postgresql_extra_packages | length > 0
+
+# A lock names one exact release, so it has to be replaced for the new release
+# to be what the next task locks.
+- name: "RHEL | Ensure no lock is left on the previous PostgreSQL release"
+  community.general.dnf_versionlock:
+    name: "{{ postgresql_packages }}"
+    state: absent
+  become: true
+  when: postgresql_packages_installed is changed or not postgresql_package_hold | bool
+
+- name: "RHEL | Ensure the PostgreSQL packages are locked at their installed release"
+  community.general.dnf_versionlock:
+    name: "{{ postgresql_packages }}"
+    state: present
+  become: true
+  when: postgresql_package_hold | bool

@@ -1,0 +1,37 @@
+---
+# Entry point for playbooks/postgresql-install.yml.
+#
+# Imported rather than included: tags on an include_tasks stop at the include
+# itself, so `--tags hardening` would reach it and skip every task inside.
+- name: "ALL | Verify this host can take the requested PostgreSQL release"
+  ansible.builtin.import_tasks: preflight.yml
+  tags: preflight
+
+- name: "RHEL | Ensure PostgreSQL is installed"
+  ansible.builtin.import_tasks: install-RedHat.yml
+  when: ansible_facts['os_family'] == 'RedHat'
+  tags: install
+
+- name: "DEBIAN | Ensure PostgreSQL is installed"
+  ansible.builtin.import_tasks: install-Debian.yml
+  when: ansible_facts['os_family'] == 'Debian'
+  tags: install
+
+- name: "ALL | Ensure the host firewall lets the permitted network reach PostgreSQL"
+  ansible.builtin.import_tasks: firewall.yml
+  when:
+    - postgresql_firewall_enabled | bool
+    - ansible_facts['virtualization_type'] != 'docker'
+  tags: firewall
+
+- name: "ALL | Ensure PostgreSQL is configured from the role's variables"
+  ansible.builtin.import_tasks: hardening.yml
+  tags: hardening
+
+- name: "ALL | Verify the server is running the release that is installed"
+  ansible.builtin.import_tasks: validate.yml
+  tags: validate
+
+- name: "ALL | Print the server report"
+  ansible.builtin.import_tasks: report-server.yml
+  tags: report

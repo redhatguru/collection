@@ -1,0 +1,86 @@
+---
+# Every supported platform, built at PostgreSQL 17 with data in it. side_effect
+# makes one upgrade fail on purpose and then does the real one to 18, and verify
+# looks at the result after a reboot, finishing with the cleanup.
+dependency:
+  name: galaxy
+driver:
+  name: vagrant
+  parallel: false
+  provider:
+    name: virtualbox
+platforms:
+  - name: rockylinux9
+    box: bento/rockylinux-9
+    memory: 2048
+    cpus: 2
+    groups:
+      - postgresql
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: rockylinux10
+    box: bento/rockylinux-10
+    memory: 2048
+    cpus: 2
+    groups:
+      - postgresql
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: ubuntu2404
+    box: bento/ubuntu-24.04
+    memory: 2048
+    cpus: 2
+    groups:
+      - postgresql
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+  - name: ubuntu2604
+    box: bento/ubuntu-26.04
+    memory: 2048
+    cpus: 2
+    groups:
+      - postgresql
+    instance_raw_config_args:
+      - "vm.boot_timeout = 600"
+    config_options:
+      ssh.insert_key: false
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "../../.."
+  playbooks:
+    prepare: ../resources/prepare.yml
+    converge: ../resources/major-upgrade/converge.yml
+    side_effect: ../resources/major-upgrade/side-effect.yml
+    verify: ../resources/major-upgrade/verify.yml
+  inventory:
+    links:
+      group_vars: ../resources/group_vars
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy
+ansible:
+  cfg:
+    ssh_connection:
+      retries: 5
+    defaults:
+      timeout: 30

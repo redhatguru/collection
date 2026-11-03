@@ -1,0 +1,20 @@
+---
+- name: "RHEL | Ensure the PostgreSQL package repository is available"
+  ansible.builtin.import_tasks: repository-RedHat.yml
+
+- name: "RHEL | Ensure the PostgreSQL packages are installed and locked"
+  ansible.builtin.import_tasks: packages-RedHat.yml
+
+- name: "RHEL | Ensure the database cluster is initialized"
+  ansible.builtin.command:
+    argv: ["{{ postgresql_bin_dir }}/postgresql-{{ postgresql_version }}-setup", initdb]
+    creates: "{{ postgresql_conf_dir }}/PG_VERSION"
+  become: true
+
+- name: "RHEL | Ensure PostgreSQL is enabled and running"
+  ansible.builtin.systemd_service:
+    name: "{{ postgresql_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true

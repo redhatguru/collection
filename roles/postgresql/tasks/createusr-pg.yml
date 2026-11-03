@@ -1,25 +1,13 @@
 ---
-- name: "ALL | Create PostgreSQL users"
-  community.general.postgresql_user:
-    name: "{{ item.name }}"
+- name: "ALL | Ensure the database users exist with their configured passwords"
+  community.postgresql.postgresql_user:
+    name: "{{ item.user }}"
     password: "{{ item.password }}"
+    port: "{{ postgresql_port | int }}"
     state: present
   become: true
   become_user: postgres
-  loop: "{{ postgresql_users }}"
+  loop: "{{ postgresql_database_users }}"
   loop_control:
-    label: "{{ item.name }}"
-
-- name: "ALL | Grant all privileges on database to users"
-  community.postgresql.postgresql_privs:
-    db: "{{ postgresql_database_name }}"
-    privs: ALL
-    type: schema
-    objs: public
-    role: "{{ item.name }}"
-  become: true
-  become_user: postgres
-  loop: "{{ postgresql_users }}"
-  loop_control:
-    label: "{{ item.name }}"
-...
+    label: "{{ item.user | default('unnamed') }}"
+  no_log: "{{ postgresql_no_log | bool }}"

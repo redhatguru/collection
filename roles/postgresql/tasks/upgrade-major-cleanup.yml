@@ -1,0 +1,101 @@
+---
+# Entry point for playbooks/postgresql-major-upgrade-cleanup.yml. Removes the old
+# cluster and its packages after a major upgrade. There is no way back from this
+# but the dump, so it refuses anything that has not provably finished upgrading.
+
+- name: "ALL | Ensure the cleanup was asked for deliberately"
+  ansible.builtin.assert:
+    that:
+      - postgresql_major_upgrade_cleanup_enabled | bool
+    fail_msg: >-
+      postgresql_major_upgrade_cleanup_enabled is false. This deletes the old
+      cluster, which is the way back from the upgrade. Set it to true for this
+      run once you are sure of the new one.
+    quiet: true
+
+- name: "RHEL | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: rpm
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Report that there is nothing to clean up"
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} has no other major version of PostgreSQL installed."
+  when: postgresql_other_major_versions | length == 0
+
+- name: "ALL | Remove the old cluster and its packages"
+  when: postgresql_other_major_versions | length > 0
+  block:
+    - name: "ALL | Check that this host finished upgrading to the requested major version"
+      ansible.builtin.stat:
+        path: "{{ postgresql_major_upgrade_marker }}"
+      become: true
+      register: postgresql_major_upgrade_marker_state
+
+    - name: "ALL | Ensure this host finished upgrading, and there is one old version"
+      ansible.builtin.assert:
+        that:
+          - postgresql_major_upgrade_marker_state.stat.exists
+          - postgresql_other_major_versions | length == 1
+        fail_msg: >-
+          {{ inventory_hostname }} has PostgreSQL
+          {{ postgresql_other_major_versions | join(', ') }} installed, but no
+          finished upgrade to {{ postgresql_version }}. That data may be the only
+          copy, so it stays.
+        quiet: true
+
+    - name: "ALL | Record the major version this host was upgraded from"
+      ansible.builtin.set_fact:
+        postgresql_major_upgrade_old_major: "{{ postgresql_other_major_versions | first }}"
+
+    - name: "ALL | Verify the new server answers before removing the old one"
+      ansible.builtin.import_tasks: validate.yml
+
+    - name: "DEBIAN | Ensure the old cluster is gone"
+      ansible.builtin.command:
+        argv: [pg_dropcluster, --stop, "{{ postgresql_major_upgrade_old_major }}", main]
+        removes: "{{ postgresql_major_upgrade_old_data_dir }}/PG_VERSION"
+      become: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "DEBIAN | Ensure the old packages are no longer held"
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: install
+      become: true
+      loop: "{{ postgresql_major_upgrade_old_packages }}"
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "DEBIAN | Ensure the old packages are removed"
+      ansible.builtin.apt:
+        name: "{{ postgresql_major_upgrade_old_packages }}"
+        state: absent
+        purge: true
+      become: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "RHEL | Ensure the old packages are no longer locked"
+      community.general.dnf_versionlock:
+        name: "{{ postgresql_major_upgrade_old_packages }}"
+        state: absent
+      become: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: "RHEL | Ensure the old packages are removed"
+      ansible.builtin.dnf:
+        name: "{{ postgresql_major_upgrade_old_packages }}"
+        state: absent
+      become: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: "RHEL | Ensure the old cluster is gone"
+      ansible.builtin.file:
+        path: "/var/lib/pgsql/{{ postgresql_major_upgrade_old_major }}"
+        state: absent
+      become: true
+      when: ansible_facts['os_family'] == 'RedHat'

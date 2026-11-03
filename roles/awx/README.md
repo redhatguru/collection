@@ -112,12 +112,11 @@ Role Variables
 - `awx_postgres_host` (no default, must be set) — address of the external
   PostgreSQL server (e.g. the host running the `postgresql` role).
 - `awx_postgres_port` (default `5432`)
-- `awx_postgres_database` (default `"awx"`) — matches `postgresql_database_name`'s
-  own default, so the two roles line up out of the box.
-- `awx_postgres_user` (default `"dbuser"`) — matches the first entry of
-  `postgresql_users`' own default.
-- `awx_postgres_password` (default `"dbuser"`) — matches that same entry's
-  password.
+- `awx_postgres_database` (default `"awx"`) — has to match the `name` of an entry
+  in the `postgresql` role's `postgresql_databases`.
+- `awx_postgres_user` (default `"dbuser"`) — has to match a `user` of that entry.
+- `awx_postgres_password` (default `"dbuser"`) — has to match that user's
+  `password`.
 - `awx_postgres_sslmode` (default `"prefer"`)
 - `awx_wait_timeout` (default `900`) — seconds to wait for the operator and
   AWX itself to become ready. AWX's images are large and the operator does
@@ -130,12 +129,13 @@ Example Playbook
 ---
 - name: Deploy PostgreSQL for AWX
   hosts: postgres_server
-  become: true
   vars:
-    postgresql_database_name: awx
-    postgresql_users:
+    postgresql_root_password: "{{ vault_postgresql_root_password }}"
+    postgresql_databases:
       - name: awx
-        password: "S3cretPassword"
+        users:
+          - user: awx
+            password: "{{ vault_awx_postgres_password }}"
     postgresql_allow_subnet: "10.0.0.0/24"
   tasks:
     - name: PostgreSQL

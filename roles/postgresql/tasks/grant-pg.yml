@@ -1,0 +1,51 @@
+---
+- name: "ALL | Ensure only a database's own users may connect to it"
+  community.postgresql.postgresql_privs:
+    db: "{{ item.name }}"
+    type: database
+    objs: "{{ item.name }}"
+    privs: CONNECT
+    roles: PUBLIC
+    port: "{{ postgresql_port | int }}"
+    state: absent
+  become: true
+  become_user: postgres
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: "{{ postgresql_no_log | bool }}"
+  when: postgresql_database_private | bool
+
+- name: "ALL | Ensure each user has all privileges on its database"
+  community.postgresql.postgresql_privs:
+    db: "{{ item.0.name }}"
+    type: database
+    objs: "{{ item.0.name }}"
+    privs: ALL
+    roles: "{{ item.1.user }}"
+    port: "{{ postgresql_port | int }}"
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgresql_databases | subelements('users') }}"
+  loop_control:
+    label: "{{ item.1.user }} on {{ item.0.name }}"
+  no_log: "{{ postgresql_no_log | bool }}"
+
+# PostgreSQL 15 took CREATE on the public schema away from everyone but its
+# owner, so database privileges alone leave a user unable to create a table.
+- name: "ALL | Ensure each user has all privileges on the public schema"
+  community.postgresql.postgresql_privs:
+    db: "{{ item.0.name }}"
+    type: schema
+    objs: public
+    privs: ALL
+    roles: "{{ item.1.user }}"
+    port: "{{ postgresql_port | int }}"
+    state: present
+  become: true
+  become_user: postgres
+  loop: "{{ postgresql_databases | subelements('users') }}"
+  loop_control:
+    label: "{{ item.1.user }} on {{ item.0.name }}"
+  no_log: "{{ postgresql_no_log | bool }}"

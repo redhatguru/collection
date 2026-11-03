@@ -1,0 +1,60 @@
+---
+- name: "DEBIAN | Ensure the packages the role needs are installed"
+  ansible.builtin.apt:
+    name:
+      - acl
+      - ca-certificates
+      - cron
+      - gnupg
+      - python3-debian
+      - python3-psycopg2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+
+- name: "DEBIAN | Ensure the keyring directory for third-party apt repositories exists"
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: "DEBIAN | Ensure the PostgreSQL package signing key is installed"
+  ansible.builtin.get_url:
+    url: "{{ postgresql_apt_repository_key_url }}"
+    dest: /etc/apt/keyrings/postgresql.asc
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  register: postgresql_repository_key
+
+# Earlier versions of this role wrote the source with apt_repository, which is
+# removed in ansible-core 2.25. Left in place, apt warns about it on every run.
+- name: "DEBIAN | Ensure the old one-line PostgreSQL apt source is gone"
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pgdg.list
+    state: absent
+  become: true
+
+- name: "DEBIAN | Ensure the PostgreSQL package repository is configured"
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    types: [deb]
+    uris: "{{ postgresql_apt_repository_url }}"
+    suites: "{{ postgresql_apt_repository_suite }}"
+    components: "{{ postgresql_apt_repository_components }}"
+    signed_by: /etc/apt/keyrings/postgresql.asc
+    enabled: true
+    state: present
+  become: true
+  register: postgresql_repository_source
+
+- name: "DEBIAN | Refresh the package lists so the PostgreSQL repository is readable"
+  ansible.builtin.apt:
+    update_cache: true
+  become: true
+  when: postgresql_repository_source is changed or postgresql_repository_key is changed

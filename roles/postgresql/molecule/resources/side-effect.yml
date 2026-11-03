@@ -1,0 +1,15 @@
+---
+- name: Update PostgreSQL by raising the pin
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Work out which releases this test run uses"
+      ansible.builtin.include_tasks: tasks/discover-releases.yml
+
+    - name: "ALL | Ensure PostgreSQL is updated to the newest release"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: server.yml
+      vars:
+        postgresql_package_version: "{{ postgresql_test_target_version }}"

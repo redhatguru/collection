@@ -1,0 +1,41 @@
+---
+- name: "RHEL | Collect the versions of the packages installed now"
+  ansible.builtin.package_facts:
+    manager: rpm
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Collect the versions of the packages installed now"
+  ansible.builtin.package_facts:
+    manager: apt
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Ask the server which release it is running"
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/psql"
+      - --port={{ postgresql_port }}
+      - --tuples-only
+      - --no-align
+      - --command=SHOW server_version
+  become: true
+  become_user: postgres
+  register: postgresql_running_version
+  changed_when: false
+  check_mode: false
+  retries: "{{ postgresql_validate_retries | int }}"
+  delay: "{{ postgresql_validate_delay | int }}"
+  until: postgresql_running_version.rc == 0
+
+# Catches a package that was replaced while the old server kept running, which
+# looks healthy from every other angle.
+- name: "ALL | Ensure the server is running the release that is installed and pinned"
+  ansible.builtin.assert:
+    that:
+      - postgresql_running_version.stdout | regex_search('^[0-9]+\.[0-9]+') == postgresql_installed_version
+      - postgresql_package_version | length == 0 or postgresql_package_version == postgresql_installed_version
+    fail_msg: >-
+      The server reports '{{ postgresql_running_version.stdout | trim }}', the
+      package installed is {{ postgresql_installed_version }} and
+      postgresql_package_version asks for
+      '{{ postgresql_package_version | default('', true) }}'.
+    quiet: true

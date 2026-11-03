@@ -1,0 +1,107 @@
+---
+- name: "ALL | Ensure there is exactly one lower major version to upgrade from"
+  ansible.builtin.assert:
+    that:
+      - postgresql_other_major_versions | length == 1
+      - postgresql_other_major_versions | first | int < postgresql_version | int
+    fail_msg: >-
+      {{ inventory_hostname }} has PostgreSQL
+      {{ postgresql_other_major_versions | join(', ') }} installed and
+      postgresql_version asks for {{ postgresql_version }}. This upgrades one
+      cluster to a higher major version, and cannot go back down.
+    quiet: true
+
+- name: "ALL | Record the major version this host is upgraded from"
+  ansible.builtin.set_fact:
+    postgresql_major_upgrade_old_major: "{{ postgresql_other_major_versions | first }}"
+
+- name: "ALL | Ensure the settings for this upgrade are consistent"
+  ansible.builtin.assert:
+    that:
+      - postgresql_major_upgrade_mode in ['copy', 'link']
+      - postgresql_package_version | length == 0 or postgresql_package_version is match('^' ~ postgresql_version ~ '\.[0-9]+$')
+    fail_msg: >-
+      postgresql_major_upgrade_mode is '{{ postgresql_major_upgrade_mode }}',
+      which has to be 'copy' or 'link', and postgresql_package_version is
+      '{{ postgresql_package_version }}', which has to be empty or a release of
+      PostgreSQL {{ postgresql_version }}.
+    quiet: true
+
+# Before the new packages go in: on Ubuntu they create an empty cluster of their
+# own, which from here on is impossible to tell from this one.
+- name: "ALL | Check whether a cluster of the new major version already exists"
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  become: true
+  register: postgresql_major_upgrade_target_state
+
+- name: "ALL | Ensure no existing cluster of the new major version is in the way"
+  ansible.builtin.assert:
+    that:
+      - not postgresql_major_upgrade_target_state.stat.exists or postgresql_major_upgrade_discard_target | bool
+    fail_msg: >-
+      {{ postgresql_data_dir }} already holds a cluster, and the role cannot tell
+      one that an interrupted upgrade left behind from one with real data in it.
+      Look at it, and if it can go, set postgresql_major_upgrade_discard_target
+      to true for this run.
+    quiet: true
+
+- name: "ALL | Ask the old server how its cluster was created"
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_major_upgrade_old_bin_dir }}/psql"
+      - --port={{ postgresql_port }}
+      - --tuples-only
+      - --no-align
+      - --command=SELECT current_setting('data_checksums'), pg_encoding_to_char(encoding), datcollate, datctype
+        FROM pg_database WHERE datname = 'template1'
+  become: true
+  become_user: postgres
+  register: postgresql_major_upgrade_old_cluster
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "ALL | Ensure the old server is running"
+  ansible.builtin.assert:
+    that:
+      - postgresql_major_upgrade_old_cluster.rc == 0
+    fail_msg: >-
+      PostgreSQL {{ postgresql_major_upgrade_old_major }} does not answer on port
+      {{ postgresql_port }}: {{ postgresql_major_upgrade_old_cluster.stderr | trim }}.
+      The upgrade needs it running, to back it up and to read how it was created.
+    quiet: true
+
+- name: "ALL | Record how the old cluster was created"
+  ansible.builtin.set_fact:
+    postgresql_major_upgrade_old_checksums: "{{ postgresql_major_upgrade_old_cluster.stdout.split('|')[0] }}"
+    postgresql_major_upgrade_old_encoding: "{{ postgresql_major_upgrade_old_cluster.stdout.split('|')[1] }}"
+    postgresql_major_upgrade_old_collate: "{{ postgresql_major_upgrade_old_cluster.stdout.split('|')[2] }}"
+    postgresql_major_upgrade_old_ctype: "{{ postgresql_major_upgrade_old_cluster.stdout.split('|')[3] }}"
+
+- name: "ALL | Measure the old cluster and the space next to it"
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  become: true
+  register: postgresql_major_upgrade_space
+  changed_when: false
+  check_mode: false
+  loop:
+    - [du, -sm, "{{ postgresql_major_upgrade_old_data_dir }}"]
+    - [df, --block-size=1M, --output=avail, "{{ postgresql_major_upgrade_work_dir }}"]
+
+- name: "ALL | Ensure there is room for a second copy of the data"
+  ansible.builtin.assert:
+    that:
+      - postgresql_major_upgrade_available_mb | int > postgresql_major_upgrade_needed_mb | int
+    fail_msg: >-
+      The old cluster takes {{ postgresql_major_upgrade_needed_mb }} MB and only
+      {{ postgresql_major_upgrade_available_mb }} MB is free on the filesystem
+      holding {{ postgresql_major_upgrade_work_dir }}. Free some up, or set
+      postgresql_major_upgrade_mode to 'link', which needs no room but gives up
+      the way back.
+    quiet: true
+  vars:
+    postgresql_major_upgrade_needed_mb: "{{ postgresql_major_upgrade_space.results[0].stdout.split() | first }}"
+    postgresql_major_upgrade_available_mb: "{{ postgresql_major_upgrade_space.results[1].stdout_lines | last | trim }}"
+  when: postgresql_major_upgrade_mode == 'copy'

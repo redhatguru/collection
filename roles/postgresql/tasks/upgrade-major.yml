@@ -1,0 +1,58 @@
+---
+# Entry point for playbooks/postgresql-major-upgrade.yml: moves the data of the
+# installed major version into the one in postgresql_version, with pg_upgrade.
+#
+# Never reachable from a normal run. The old cluster and its packages stay until
+# tasks/upgrade-major-cleanup.yml removes them, so that until then the way back
+# is to stop the new server and start the old one.
+
+- name: "ALL | Ensure the major upgrade was asked for deliberately"
+  ansible.builtin.assert:
+    that:
+      - postgresql_major_upgrade_enabled | bool
+    fail_msg: >-
+      postgresql_major_upgrade_enabled is false. A major upgrade takes the
+      database down and rewrites its catalog, so it never happens by accident.
+      Read the release notes of the version you are moving to, then set it to
+      true for this run.
+    quiet: true
+
+- name: "ALL | Ensure the postgres superuser password is a real one"
+  ansible.builtin.import_tasks: preflight-password.yml
+
+- name: "RHEL | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: rpm
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Check whether this host was already upgraded to the requested major version"
+  ansible.builtin.stat:
+    path: "{{ postgresql_major_upgrade_marker }}"
+  become: true
+  register: postgresql_major_upgrade_marker_state
+
+- name: "ALL | Determine whether this host still has to be upgraded"
+  ansible.builtin.set_fact:
+    postgresql_major_upgrade_needed: >-
+      {{ postgresql_other_major_versions | length > 0 and not postgresql_major_upgrade_marker_state.stat.exists }}
+
+- name: "ALL | Report that this host has nothing to upgrade"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} already runs PostgreSQL {{ postgresql_version }}.
+      {{ 'The old packages and data are still there: playbooks/postgresql-major-upgrade-cleanup.yml removes them.'
+         if postgresql_other_major_versions | length > 0 else '' }}
+  when: not postgresql_major_upgrade_needed | bool
+
+- name: "ALL | Verify this host can take the upgrade"
+  ansible.builtin.import_tasks: upgrade-major-preflight.yml
+  when: postgresql_major_upgrade_needed | bool
+
+- name: "ALL | Upgrade the cluster to the requested major version"
+  ansible.builtin.import_tasks: upgrade-major-run.yml
+  when: postgresql_major_upgrade_needed | bool

@@ -1,0 +1,33 @@
+---
+# Entry point for playbooks/postgresql-databases.yml.
+#
+# Users first, because a database can name one as its owner, and grants after
+# the database they apply to.
+- name: "ALL | Verify postgresql_databases can be applied to this host"
+  ansible.builtin.import_tasks: preflight-databases.yml
+  tags: preflight
+
+- name: "ALL | Ensure the database users exist"
+  ansible.builtin.import_tasks: createusr-pg.yml
+  tags: createusr
+
+- name: "ALL | Ensure the databases exist"
+  ansible.builtin.import_tasks: createdb-pg.yml
+  tags: createdb
+
+- name: "ALL | Ensure each database's users have their privileges"
+  ansible.builtin.import_tasks: grant-pg.yml
+  tags: createusr
+
+- name: "ALL | Ensure each database has its extensions"
+  ansible.builtin.import_tasks: plugins-pg.yml
+  tags: plugins
+
+- name: "ALL | Ensure the databases are backed up"
+  ansible.builtin.import_tasks: backup.yml
+  when: postgresql_backup_enabled | bool
+  tags: backup
+
+- name: "ALL | Print the database report"
+  ansible.builtin.import_tasks: report.yml
+  tags: report

@@ -1,0 +1,310 @@
+---
+# The order is the point of this file: back up while the old server still works,
+# install next to it, and only then take it down. Everything up to pg_upgrade can
+# be undone by the rescue below.
+
+- name: "ALL | Ensure the directory for the pre-upgrade dump exists and is private"
+  ansible.builtin.file:
+    path: "{{ postgresql_major_upgrade_backup_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+  become: true
+  when: postgresql_major_upgrade_backup_before | bool
+
+- name: "ALL | Dump the whole server before anything is touched"
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_major_upgrade_old_bin_dir }}/pg_dumpall"
+      - --port={{ postgresql_port }}
+      - "--file={{ postgresql_major_upgrade_dump }}"
+  become: true
+  become_user: postgres
+  changed_when: true
+  vars:
+    postgresql_major_upgrade_dump: >-
+      {{ postgresql_major_upgrade_backup_dir }}/pre-upgrade-{{ postgresql_major_upgrade_old_major }}-to-{{
+      postgresql_version }}-{{ ansible_facts['date_time']['iso8601_basic_short'] }}.sql
+  when: postgresql_major_upgrade_backup_before | bool
+
+- name: "RHEL | Ensure the repository of the new major version is available"
+  ansible.builtin.import_tasks: repository-RedHat.yml
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Ensure the package repository is available"
+  ansible.builtin.import_tasks: repository-Debian.yml
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Ensure the packages of the new major version are installed next to the old ones"
+  ansible.builtin.import_tasks: packages-RedHat.yml
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Ensure the packages of the new major version are installed next to the old ones"
+  ansible.builtin.import_tasks: packages-Debian.yml
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Move the data into a new cluster, or fall back to the old one"
+  block:
+    # On Ubuntu the packages just created this, with whatever the system's
+    # defaults are. That is what a new cluster must not have, so it goes.
+    - name: "DEBIAN | Ensure the cluster the packages created is gone"
+      ansible.builtin.command:
+        argv: [pg_dropcluster, --stop, "{{ postgresql_version }}", main]
+        removes: "{{ postgresql_data_dir }}/PG_VERSION"
+      become: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "RHEL | Ensure no earlier attempt is left in the new data directory"
+      ansible.builtin.file:
+        path: "{{ postgresql_data_dir }}"
+        state: absent
+      become: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: "DEBIAN | Ensure a new cluster exists, created the way the old one was"
+      ansible.builtin.command:
+        argv: >-
+          {{ ['pg_createcluster',
+              '--encoding=' ~ postgresql_major_upgrade_old_encoding,
+              '--lc-collate=' ~ postgresql_major_upgrade_old_collate,
+              '--lc-ctype=' ~ postgresql_major_upgrade_old_ctype,
+              postgresql_version, 'main', '--']
+             + postgresql_major_upgrade_checksum_arguments }}
+      become: true
+      changed_when: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "RHEL | Ensure a new cluster exists, created the way the old one was"
+      ansible.builtin.command:
+        argv: ["{{ postgresql_bin_dir }}/postgresql-{{ postgresql_version }}-setup", initdb]
+        creates: "{{ postgresql_data_dir }}/PG_VERSION"
+      environment:
+        PGSETUP_INITDB_OPTIONS: >-
+          {{ (['--encoding=' ~ postgresql_major_upgrade_old_encoding,
+               '--lc-collate=' ~ postgresql_major_upgrade_old_collate,
+               '--lc-ctype=' ~ postgresql_major_upgrade_old_ctype]
+              + postgresql_major_upgrade_checksum_arguments) | join(' ') }}
+      become: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    # Before pg_upgrade and not after: it has to be able to load whatever
+    # shared_preload_libraries names in postgresql_settings.
+    - name: "ALL | Ensure the new cluster is configured from the role's variables"
+      ansible.builtin.import_tasks: configure.yml
+
+    - name: "ALL | Ensure the old server is stopped"
+      ansible.builtin.systemd_service:
+        name: "{{ postgresql_major_upgrade_old_service }}"
+        state: stopped
+      become: true
+
+    - name: "ALL | Check that pg_upgrade can move this cluster"
+      ansible.builtin.command:
+        argv: "{{ postgresql_major_upgrade_command + ['--check'] }}"
+        chdir: "{{ postgresql_major_upgrade_work_dir }}"
+      become: true
+      become_user: postgres
+      changed_when: false
+
+    - name: "ALL | Move the data into the new cluster"
+      ansible.builtin.command:
+        argv: "{{ postgresql_major_upgrade_command }}"
+        chdir: "{{ postgresql_major_upgrade_work_dir }}"
+      become: true
+      become_user: postgres
+      changed_when: true
+
+  rescue:
+    # pg_upgrade renames this as the last thing before it links, and from then on
+    # the old cluster must not be started.
+    - name: "ALL | Check whether the old cluster can still be started"
+      ansible.builtin.stat:
+        path: "{{ postgresql_major_upgrade_old_data_dir }}/global/pg_control.old"
+      become: true
+      register: postgresql_major_upgrade_old_control
+
+    - name: "DEBIAN | Ensure the failed new cluster is gone"
+      ansible.builtin.command:
+        argv: [pg_dropcluster, --stop, "{{ postgresql_version }}", main]
+        removes: "{{ postgresql_data_dir }}/PG_VERSION"
+      become: true
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - not postgresql_major_upgrade_old_control.stat.exists
+
+    - name: "RHEL | Ensure the failed new cluster is gone"
+      ansible.builtin.file:
+        path: "{{ postgresql_data_dir }}"
+        state: absent
+      become: true
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - not postgresql_major_upgrade_old_control.stat.exists
+
+    # Left installed, they would make the normal playbooks refuse this host as
+    # one that is halfway through an upgrade.
+    - name: "DEBIAN | Ensure the new packages are no longer held"
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: install
+      become: true
+      loop: "{{ postgresql_packages }}"
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - not postgresql_major_upgrade_old_control.stat.exists
+
+    - name: "DEBIAN | Ensure the new packages are removed"
+      ansible.builtin.apt:
+        name: "{{ postgresql_packages + postgresql_extra_packages }}"
+        state: absent
+        purge: true
+      become: true
+      when:
+        - ansible_facts['os_family'] == 'Debian'
+        - not postgresql_major_upgrade_old_control.stat.exists
+
+    - name: "RHEL | Ensure the new packages are no longer locked"
+      community.general.dnf_versionlock:
+        name: "{{ postgresql_packages }}"
+        state: absent
+      become: true
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - not postgresql_major_upgrade_old_control.stat.exists
+
+    - name: "RHEL | Ensure the new packages are removed"
+      ansible.builtin.dnf:
+        name: "{{ postgresql_packages + postgresql_extra_packages }}"
+        state: absent
+      become: true
+      when:
+        - ansible_facts['os_family'] == 'RedHat'
+        - not postgresql_major_upgrade_old_control.stat.exists
+
+    - name: "ALL | Ensure the old server is running again"
+      ansible.builtin.systemd_service:
+        name: "{{ postgresql_major_upgrade_old_service }}"
+        state: started
+      become: true
+      when: not postgresql_major_upgrade_old_control.stat.exists
+
+    - name: "ALL | Report what the failed upgrade left behind"
+      ansible.builtin.fail:
+        msg: >-
+          The upgrade to PostgreSQL {{ postgresql_version }} failed at
+          '{{ ansible_failed_task.name }}'.
+          {{ 'PostgreSQL ' ~ postgresql_major_upgrade_old_major
+             ~ ' is running again with its data untouched, and the new packages are gone.'
+             ~ ' pg_upgrade explains itself in its output above.'
+             if not postgresql_major_upgrade_old_control.stat.exists
+             else 'pg_upgrade had started linking, so the old cluster can no longer be started.'
+                  ~ ' Restore the dump in ' ~ postgresql_major_upgrade_backup_dir ~ '.' }}
+
+- name: "ALL | Record that the new cluster holds the data now"
+  ansible.builtin.copy:
+    dest: "{{ postgresql_major_upgrade_marker }}"
+    content: "Upgraded from PostgreSQL {{ postgresql_major_upgrade_old_major }}\n"
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  become: true
+
+# It would otherwise come back at the next reboot, on the same port as the new one.
+- name: "DEBIAN | Ensure the old cluster is not started at boot"
+  ansible.builtin.copy:
+    dest: "/etc/postgresql/{{ postgresql_major_upgrade_old_major }}/main/start.conf"
+    content: "manual\n"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  become: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "RHEL | Ensure the old server is not started at boot"
+  ansible.builtin.systemd_service:
+    name: "{{ postgresql_major_upgrade_old_service }}"
+    enabled: false
+  become: true
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "ALL | Ensure the new server is enabled and running"
+  ansible.builtin.systemd_service:
+    name: "{{ postgresql_cluster_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: "ALL | Apply any pending restart before using the new server"
+  ansible.builtin.meta: flush_handlers
+
+- name: "ALL | Verify the new server is running the release that is installed"
+  ansible.builtin.import_tasks: validate.yml
+
+- name: "ALL | Ensure the postgres superuser has the configured password"
+  community.postgresql.postgresql_user:
+    name: postgres
+    password: "{{ postgresql_root_password }}"
+    port: "{{ postgresql_port | int }}"
+  become: true
+  become_user: postgres
+  no_log: "{{ postgresql_no_log | bool }}"
+
+# pg_upgrade writes this when an extension has a newer version in the new major.
+- name: "ALL | Check whether pg_upgrade left extensions to update"
+  ansible.builtin.stat:
+    path: "{{ postgresql_major_upgrade_work_dir }}/update_extensions.sql"
+  become: true
+  register: postgresql_major_upgrade_extensions
+
+- name: "ALL | Update the extensions pg_upgrade found"
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/psql"
+      - --port={{ postgresql_port }}
+      - --dbname=postgres
+      - --set=ON_ERROR_STOP=1
+      - "--file={{ postgresql_major_upgrade_work_dir }}/update_extensions.sql"
+  become: true
+  become_user: postgres
+  changed_when: true
+  when: postgresql_major_upgrade_extensions.stat.exists
+
+# pg_upgrade does not bring all of the planner's statistics along, so until this
+# has run the first queries on the new server can be very slow.
+- name: "ALL | Rebuild the planner statistics"
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/vacuumdb"
+      - --port={{ postgresql_port }}
+      - --all
+      - --analyze-in-stages
+  become: true
+  become_user: postgres
+  changed_when: true
+
+# The jobs name the old major's pg_dump, which refuses a newer server and is gone
+# after the cleanup. Nothing would report that until someone needed a backup.
+- name: "ALL | Ensure the scheduled backups use the new major version's pg_dump"
+  ansible.builtin.import_tasks: backup.yml
+  when:
+    - postgresql_backup_enabled | bool
+    - postgresql_databases | length > 0
+
+- name: "ALL | Ensure pg_upgrade's leftover scripts are gone"
+  ansible.builtin.file:
+    path: "{{ postgresql_major_upgrade_work_dir }}/{{ item }}"
+    state: absent
+  become: true
+  loop:
+    - update_extensions.sql
+    - delete_old_cluster.sh
+
+- name: "ALL | Report the completed upgrade"
+  ansible.builtin.debug:
+    msg:
+      - "Upgraded            : PostgreSQL {{ postgresql_major_upgrade_old_major }} -> {{ postgresql_installed_version }}"
+      - "Old cluster         : {{ postgresql_major_upgrade_old_data_dir }}, stopped"
+      - "Way back            : see 'Going back' in roles/postgresql/README.md"
+      - "When you are sure   : playbooks/postgresql-major-upgrade-cleanup.yml removes the old cluster for good"

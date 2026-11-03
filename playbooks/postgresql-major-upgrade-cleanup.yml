@@ -1,0 +1,17 @@
+---
+# Removes the old cluster and packages after playbooks/postgresql-major-upgrade.yml.
+# After this there is no way back but the pre-upgrade dump.
+#
+#   ansible-playbook -i inventories/lab-postgresql/hosts.yml \
+#     playbooks/postgresql-major-upgrade-cleanup.yml \
+#     -e postgresql_major_upgrade_cleanup_enabled=true
+- name: Remove the old PostgreSQL cluster after a major upgrade
+  hosts: postgresql
+  serial: 1
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Ensure the old cluster and its packages are gone"
+      ansible.builtin.import_role:
+        name: redhatguru.general.postgresql
+        tasks_from: upgrade-major-cleanup.yml

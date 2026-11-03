@@ -1,0 +1,324 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: true
+
+  vars:
+    postgresql_test_psql: "/usr/{{ 'pgsql-17/bin' if ansible_facts['os_family'] == 'RedHat' else 'lib/postgresql/17/bin' }}/psql"
+
+  tasks:
+    # Everything is checked on a host that has just come back from a reboot.
+    - name: "ALL | Reboot the host before checking anything"
+      ansible.builtin.reboot:
+      become: true
+
+    - name: "ALL | Work out which releases this test run uses"
+      ansible.builtin.include_tasks: tasks/discover-releases.yml
+
+    # --------------------------------------------------------------------
+    # The pin and the update
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Ask the server which release it is running"
+      ansible.builtin.command:
+        argv: ["{{ postgresql_test_psql }}", --port=5433, -tAc, SHOW server_version]
+      become: true
+      become_user: postgres
+      register: postgresql_test_running
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: postgresql_test_running.rc == 0
+
+    - name: "ALL | Assert the update reached the running server"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_running.stdout is match(postgresql_test_target_version ~ '( |$)')
+          - postgresql_test_target_version != postgresql_test_initial_version
+        fail_msg: >-
+          The server reports {{ postgresql_test_running.stdout }}, expected
+          {{ postgresql_test_target_version }}.
+
+    - name: "DEBIAN | Collect the dpkg selections for the PostgreSQL packages"
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Package} ${Version} ${Status}\n", postgresql-17, postgresql-client-17]
+      register: postgresql_test_holds
+      changed_when: false
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "DEBIAN | Assert the packages are held at the release updated to"
+      ansible.builtin.assert:
+        that:
+          - >-
+            postgresql_test_holds.stdout_lines
+            | select('search', ' ' ~ postgresql_test_target_version ~ '-.* hold ok installed') | list | length == 2
+        fail_msg: "{{ postgresql_test_holds.stdout }}"
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: "RHEL | Collect the package locks"
+      ansible.builtin.command:
+        argv: [dnf, versionlock, list]
+      become: true
+      register: postgresql_test_locks
+      changed_when: false
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: "RHEL | Assert the packages are locked at the release updated to, and only that"
+      ansible.builtin.assert:
+        that:
+          - >-
+            postgresql_test_locks.stdout_lines | select('search', 'postgresql17')
+            | select('search', ':' ~ postgresql_test_target_version ~ '-') | list | length == 4
+          - postgresql_test_locks.stdout_lines | select('search', 'postgresql17') | list | length == 4
+        fail_msg: "{{ postgresql_test_locks.stdout }}"
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    # --------------------------------------------------------------------
+    # The configuration variables
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Read the settings the server is using"
+      ansible.builtin.command:
+        argv:
+          - "{{ postgresql_test_psql }}"
+          - --port=5433
+          - -tAc
+          - >-
+            SELECT current_setting('max_connections'), current_setting('log_line_prefix'),
+            current_setting('log_connections'), current_setting('listen_addresses')
+      become: true
+      become_user: postgres
+      register: postgresql_test_settings
+      changed_when: false
+
+    - name: "ALL | Assert postgresql_settings reached the server"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_settings.stdout == "150|it's molecule|on|*"
+        fail_msg: "{{ postgresql_test_settings.stdout }}"
+
+    - name: "ALL | Check the network rule in pg_hba.conf"
+      ansible.builtin.command:
+        argv:
+          - "{{ postgresql_test_psql }}"
+          - --port=5433
+          - -tAc
+          - "SELECT auth_method FROM pg_hba_file_rules WHERE address = '10.10.0.0' AND error IS NULL"
+      become: true
+      become_user: postgres
+      register: postgresql_test_hba
+      changed_when: false
+
+    - name: "ALL | Assert the permitted network may log in with a password"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_hba.stdout == 'scram-sha-256'
+        fail_msg: "{{ postgresql_test_hba.stdout }}"
+
+    # --------------------------------------------------------------------
+    # Databases, users and extensions
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Log in over the network as each user, on each database it belongs to"
+      ansible.builtin.command:
+        argv:
+          - "{{ postgresql_test_psql }}"
+          - --host=127.0.0.1
+          - --port=5433
+          - "--username={{ item.user }}"
+          - "--dbname={{ item.db }}"
+          - -tAc
+          - "CREATE TABLE IF NOT EXISTS molecule_{{ item.user | replace('-', '_') }} (i int)"
+      environment:
+        PGPASSWORD: "{{ item.password }}"
+      changed_when: false
+      loop:
+        - { db: molecule_shop, user: shop_app, password: shop_app_pass }
+        - { db: molecule_shop, user: management, password: management_pass }
+        - { db: molecule_awx, user: awx_owner, password: awx_owner_pass }
+        - { db: molecule_awx, user: management, password: management_pass }
+        - { db: molecule_plain, user: plain-reader, password: plain_reader_pass }
+      loop_control:
+        label: "{{ item.user }} on {{ item.db }}"
+
+    - name: "ALL | Try to log in as a user on a database it does not belong to"
+      ansible.builtin.command:
+        argv: ["{{ postgresql_test_psql }}", --host=127.0.0.1, --port=5433, --username=shop_app, --dbname=molecule_awx, -tAc, SELECT 1]
+      environment:
+        PGPASSWORD: shop_app_pass
+      register: postgresql_test_foreign
+      changed_when: false
+      failed_when: false
+
+    - name: "ALL | Try to log in with the wrong password"
+      ansible.builtin.command:
+        argv: ["{{ postgresql_test_psql }}", --host=127.0.0.1, --port=5433, --username=shop_app, --dbname=molecule_shop, -tAc, SELECT 1]
+      environment:
+        PGPASSWORD: not_the_password
+      register: postgresql_test_wrong
+      changed_when: false
+      failed_when: false
+
+    - name: "ALL | Assert both logins were refused"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_foreign.rc != 0
+          - "'permission denied' in postgresql_test_foreign.stderr"
+          - postgresql_test_wrong.rc != 0
+          - "'password authentication failed' in postgresql_test_wrong.stderr"
+
+    - name: "ALL | List what each database ended up with"
+      ansible.builtin.command:
+        argv:
+          - "{{ postgresql_test_psql }}"
+          - --port=5433
+          - "--dbname={{ item }}"
+          - -tAc
+          - >-
+            SELECT pg_get_userbyid(d.datdba) || '/' || pg_encoding_to_char(d.encoding) || '/' ||
+            coalesce((SELECT string_agg(extname, ',' ORDER BY extname) FROM pg_extension WHERE extname <> 'plpgsql'), '')
+            FROM pg_database d WHERE d.datname = current_database()
+      become: true
+      become_user: postgres
+      register: postgresql_test_databases
+      changed_when: false
+      loop: [molecule_shop, molecule_awx, molecule_plain]
+
+    - name: "ALL | Assert owner, encoding and extensions are what was asked for"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_databases.results[0].stdout == 'postgres/UTF8/btree_gist,pg_trgm,vector'
+          - postgresql_test_databases.results[1].stdout == 'awx_owner/UTF8/'
+          - postgresql_test_databases.results[2].stdout == 'postgres/LATIN1/'
+        fail_msg: "{{ postgresql_test_databases.results | map(attribute='stdout') | list }}"
+
+    # --------------------------------------------------------------------
+    # Backups
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Read the scheduled backup job of one database"
+      ansible.builtin.slurp:
+        src: /etc/cron.d/postgresql-backup-molecule_shop
+      become: true
+      register: postgresql_test_cron
+
+    # The job line as cron would run it, minus the escaping only cron wants.
+    - name: "ALL | Run that job the way cron would"
+      ansible.builtin.command:
+        argv:
+          - /bin/sh
+          - -c
+          - >-
+            {{ (postgresql_test_cron.content | b64decode).splitlines()
+               | select('search', 'pg_dump') | first
+               | regex_replace('^.*postgres ', '') | replace('\%', '%') }}
+      become: true
+      become_user: postgres
+      changed_when: true
+
+    - name: "ALL | Find the dump it wrote"
+      ansible.builtin.find:
+        paths: /var/backups/molecule-postgresql
+        patterns: "molecule_shop_*.sql.gz"
+      become: true
+      register: postgresql_test_dumps
+
+    - name: "ALL | Assert the job wrote a non-empty dump and has a retention job"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_dumps.files | length > 0
+          - (postgresql_test_dumps.files | first).size > 100
+          - "'-mtime +30 -delete' in postgresql_test_cron.content | b64decode"
+          - "'molecule_awx' not in postgresql_test_cron.content | b64decode"
+
+    # --------------------------------------------------------------------
+    # What the role has to refuse
+    # --------------------------------------------------------------------
+
+    - name: "ALL | Try to move PostgreSQL backwards"
+      block:
+        - name: "ALL | Point the pin at the release the host came from"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: preflight.yml
+          vars:
+            postgresql_package_version: "{{ postgresql_test_initial_version }}"
+
+        - name: "ALL | Record that the role accepted the downgrade"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_downgrade: false
+      rescue:
+        - name: "ALL | Record that the role refused the downgrade"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_downgrade: true
+
+    - name: "ALL | Try a major version upgrade"
+      block:
+        - name: "ALL | Ask for another major version"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: preflight.yml
+          vars:
+            postgresql_version: "18"
+
+        - name: "ALL | Record that the role accepted the major upgrade"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_major: false
+      rescue:
+        - name: "ALL | Record that the role refused the major upgrade"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_major: true
+
+    - name: "ALL | Try a placeholder as a user's password"
+      block:
+        - name: "ALL | Ask for a user with a placeholder password"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: preflight-databases.yml
+          vars:
+            postgresql_databases:
+              - name: refused
+                users:
+                  - user: refused
+                    password: "ChangeMe123!"
+
+        - name: "ALL | Record that the role accepted the placeholder"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_placeholder: false
+      rescue:
+        - name: "ALL | Record that the role refused the placeholder"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_placeholder: true
+
+    - name: "ALL | Try one user with two passwords"
+      block:
+        - name: "ALL | Ask for the same user with different passwords"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: preflight-databases.yml
+          vars:
+            postgresql_databases:
+              - name: refused_one
+                users:
+                  - user: refused
+                    password: "one"
+              - name: refused_two
+                users:
+                  - user: refused
+                    password: "two"
+
+        - name: "ALL | Record that the role accepted two passwords"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_two_passwords: false
+      rescue:
+        - name: "ALL | Record that the role refused two passwords"
+          ansible.builtin.set_fact:
+            postgresql_test_refused_two_passwords: true
+
+    - name: "ALL | Assert the role refused all of them"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_refused_downgrade
+          - postgresql_test_refused_major
+          - postgresql_test_refused_placeholder
+          - postgresql_test_refused_two_passwords

@@ -1,0 +1,30 @@
+---
+# Worked example for playbooks/postgresql-install.yml and
+# playbooks/postgresql-databases.yml. Every variable and its default is in
+# roles/postgresql/defaults/main.yml.
+#
+# Create the secrets below, and put the results in a vault file next to this one:
+#   ansible-vault encrypt_string --name vault_postgresql_root_password '<value>'
+
+postgresql_version: "17"
+
+# Raise this and run playbooks/postgresql-install.yml to update.
+postgresql_package_version: "17.11"
+
+postgresql_allow_subnet: "10.10.70.0/24"
+postgresql_root_password: "{{ vault_postgresql_root_password }}"
+
+postgresql_settings:
+  max_connections: 200
+  shared_buffers: "1GB"
+
+postgresql_databases:
+  - name: awx
+    plugins:
+      - pg_trgm
+      - btree_gist
+    users:
+      - user: awx_test
+        password: "{{ vault_awx_test_password }}"
+      - user: management
+        password: "{{ vault_management_password }}"

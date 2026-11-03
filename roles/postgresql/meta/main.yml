@@ -3,8 +3,23 @@ dependencies: []
 
 galaxy_info:
   role_name: postgresql
+  namespace: redhatguru
   author: Guido Martens
-  description: Install and deploy Postgres
+  description: >-
+    Installs PostgreSQL at a pinned release and holds it there, configures the
+    server from role variables, and creates databases with their users and
+    extensions. Installing and creating databases are separate entry points.
   license: "license (BSD, MIT)"
   min_ansible_version: "2.15"
-  galaxy_tags: []
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+    - name: Ubuntu
+      versions:
+        - noble
+        - resolute
+  galaxy_tags:
+    - postgresql
+    - database

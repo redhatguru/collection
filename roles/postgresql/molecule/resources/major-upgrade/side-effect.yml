@@ -1,0 +1,68 @@
+---
+- name: Fail an upgrade on purpose, and check the old server comes back
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Try an upgrade that pg_upgrade will refuse"
+      block:
+        - name: "ALL | Ask for an upgrade with an option pg_upgrade does not know"
+          ansible.builtin.include_role:
+            name: postgresql
+            tasks_from: upgrade-major.yml
+          vars:
+            postgresql_version: "18"
+            postgresql_major_upgrade_enabled: true
+            postgresql_major_upgrade_extra_arguments: ["--not-an-option"]
+
+        - name: "ALL | Record that the upgrade went through"
+          ansible.builtin.set_fact:
+            postgresql_test_upgrade_failed: false
+      rescue:
+        - name: "ALL | Record that the upgrade failed"
+          ansible.builtin.set_fact:
+            postgresql_test_upgrade_failed: true
+
+    - name: "ALL | Read the row from whichever server answers"
+      community.postgresql.postgresql_query:
+        db: molecule_shop
+        port: 5433
+        query: "SELECT current_setting('server_version_num') AS version, name FROM survivor"
+      become: true
+      become_user: postgres
+      register: postgresql_test_after_failure
+      retries: 12
+      delay: 5
+      until: postgresql_test_after_failure is not failed
+
+    - name: "ALL | Collect the packages the failed upgrade left behind"
+      ansible.builtin.package_facts:
+        manager: "{{ 'rpm' if ansible_facts['os_family'] == 'RedHat' else 'apt' }}"
+
+    - name: "ALL | Run the normal checks for the old major version, which must still pass"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: preflight.yml
+
+    - name: "ALL | Assert the failed upgrade left the old server running with its data"
+      ansible.builtin.assert:
+        that:
+          - postgresql_test_upgrade_failed
+          - "'postgresql-18' not in ansible_facts['packages']"
+          - "'postgresql18-server' not in ansible_facts['packages']"
+          - postgresql_test_after_failure.query_result[0].version is match('^17')
+          - postgresql_test_after_failure.query_result[0].name == 'still here'
+        fail_msg: "{{ postgresql_test_after_failure.query_result | to_json }}"
+
+- name: Upgrade to the new major version
+  hosts: all
+  gather_facts: true
+  vars:
+    postgresql_version: "18"
+    postgresql_major_upgrade_enabled: true
+
+  tasks:
+    - name: "ALL | Ensure the cluster is upgraded to PostgreSQL 18"
+      ansible.builtin.include_role:
+        name: postgresql
+        tasks_from: upgrade-major.yml

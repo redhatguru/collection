@@ -1,4 +1,0 @@
----
-- name: "ALL | Include OS-specific installation tasks"
-  ansible.builtin.include_tasks: "install-pg-{{ ansible_facts['os_family'] }}.yml"
-...

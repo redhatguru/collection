@@ -1,0 +1,20 @@
+---
+- name: Converge on the old major version, with data in it
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: "ALL | Ensure PostgreSQL 17 is installed with its databases"
+      ansible.builtin.include_role:
+        name: postgresql
+
+    - name: "ALL | Ensure there is a row whose survival can be checked"
+      community.postgresql.postgresql_query:
+        db: molecule_shop
+        port: 5433
+        query: >-
+          CREATE TABLE IF NOT EXISTS survivor (name text PRIMARY KEY, embedding vector(3));
+          INSERT INTO survivor VALUES ('still here', '[1,2,3]') ON CONFLICT DO NOTHING;
+      become: true
+      become_user: postgres
+      changed_when: false

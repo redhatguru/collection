@@ -1,24 +1,17 @@
 ---
-# Configure pg_hba.conf
-- name: "ALL | Configure pg_hba.conf"
-  ansible.builtin.lineinfile:
-    dest: "{{ postgresql_hba }}"
-    line: 'host    all          all            {{ postgresql_allow_subnet }}  md5'
-    state: present
-  notify: "ALL | Restart postgresql"
+- name: "ALL | Ensure the configuration files match the role's variables"
+  ansible.builtin.import_tasks: configure.yml
 
-- name: "ALL | Set listen_adressess"
-  ansible.builtin.lineinfile:
-    dest: "{{ postgresql_conf }}"
-    regexp: '^#listen_addresses\s*='
-    line: "listen_addresses = '*'"
-    state: present
-    backup: true
-  notify: "ALL | Restart postgresql"
+# Flushed here because everything below logs in to the server, on the port this
+# run may just have changed.
+- name: "ALL | Apply any pending restart before using the server"
+  ansible.builtin.meta: flush_handlers
 
-- name: "ALL | Set password for postgres database user"
-  become: true
-  become_user: postgres
-  community.general.postgresql_user:
+- name: "ALL | Ensure the postgres superuser has the configured password"
+  community.postgresql.postgresql_user:
     name: postgres
     password: "{{ postgresql_root_password }}"
+    port: "{{ postgresql_port | int }}"
+  become: true
+  become_user: postgres
+  no_log: "{{ postgresql_no_log | bool }}"

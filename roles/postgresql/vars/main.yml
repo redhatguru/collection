@@ -1,2 +1,138 @@
 ---
-# vars file for postgres
+# vars file for postgresql
+#
+# Values the role derives rather than accepts.
+
+postgresql_supported_os_families:
+  - Debian
+  - RedHat
+
+postgresql_service_name: >-
+  {{ 'postgresql-' + postgresql_version if ansible_facts['os_family'] == 'RedHat' else 'postgresql' }}
+
+# What gets pinned and held. postgresql-contrib-17 is missing on Ubuntu on
+# purpose: there it is a virtual package postgresql-17 provides, and apt cannot
+# install a virtual package at a version.
+postgresql_packages_debian:
+  - "postgresql-{{ postgresql_version }}"
+  - "postgresql-client-{{ postgresql_version }}"
+postgresql_packages_redhat:
+  - "postgresql{{ postgresql_version }}"
+  - "postgresql{{ postgresql_version }}-libs"
+  - "postgresql{{ postgresql_version }}-server"
+  - "postgresql{{ postgresql_version }}-contrib"
+postgresql_packages: >-
+  {{ postgresql_packages_redhat if ansible_facts['os_family'] == 'RedHat' else postgresql_packages_debian }}
+
+# The dash ends the version, or 17.1 would also match 17.10. The wildcard covers
+# the revision, which differs per OS release: 17.10-1.pgdg24.04+1, 17.10-2PGDG.rhel9.8.
+postgresql_package_version_separator: "{{ '-' if ansible_facts['os_family'] == 'RedHat' else '=' }}"
+postgresql_package_specs: >-
+  {{ postgresql_packages
+     if postgresql_package_version | length == 0
+     else postgresql_packages
+          | map('regex_replace', '$', postgresql_package_version_separator ~ postgresql_package_version ~ '-*')
+          | list }}
+
+# The package that says which release this host runs, and the name pattern of
+# that same package for any other major version.
+postgresql_server_package: >-
+  {{ 'postgresql' + postgresql_version + '-server'
+     if ansible_facts['os_family'] == 'RedHat'
+     else 'postgresql-' + postgresql_version }}
+postgresql_server_package_pattern: >-
+  {{ '^postgresql[0-9]+-server$' if ansible_facts['os_family'] == 'RedHat' else '^postgresql-[0-9]+$' }}
+
+# "17.10-1.pgdg24.04+1" -> "17.10". Needs package_facts to have run.
+postgresql_installed_version: >-
+  {{ (ansible_facts['packages'][postgresql_server_package] | default([]) | first | default({})).version | default('')
+     | regex_search('^[0-9]+\.[0-9]+') | default('', true) }}
+
+# Refused wherever a password is read: these are in a public repository.
+postgresql_password_placeholders:
+  - "ChangeMe"
+  - "ChangeMe123!"
+  - "ChangeMe456!"
+  - "ChangeMeToo123!"
+  - "changeme"
+
+# Every user of every database. A user under two databases with one password is
+# one entry, and with two passwords it is two: that is what preflight checks.
+postgresql_database_users: "{{ postgresql_databases | map(attribute='users') | flatten | unique }}"
+
+# --------------------------------------------------------------------------
+# Major version upgrades
+# --------------------------------------------------------------------------
+
+postgresql_data_dir: >-
+  {{ '/var/lib/pgsql/' + postgresql_version + '/data'
+     if ansible_facts['os_family'] == 'RedHat'
+     else '/var/lib/postgresql/' + postgresql_version + '/main' }}
+
+# The unit of the cluster itself. On Debian `postgresql` is an empty parent unit,
+# which says nothing about whether a given cluster is up.
+postgresql_cluster_service_name: >-
+  {{ 'postgresql-' + postgresql_version
+     if ansible_facts['os_family'] == 'RedHat'
+     else 'postgresql@' + postgresql_version + '-main' }}
+
+# Written once the upgrade has succeeded. It lives in the data directory so that
+# it cannot outlive the cluster it speaks for.
+postgresql_major_upgrade_marker: "{{ postgresql_data_dir }}/ansible-major-upgrade-done"
+
+# pg_upgrade writes its scripts and its socket in its working directory, which
+# postgres has to be able to write to.
+postgresql_major_upgrade_work_dir: >-
+  {{ '/var/lib/pgsql' if ansible_facts['os_family'] == 'RedHat' else '/var/lib/postgresql' }}
+
+# All of these need postgresql_major_upgrade_old_major, which tasks/upgrade-major.yml
+# reads from the packages installed.
+postgresql_major_upgrade_old_bin_dir: >-
+  {{ '/usr/pgsql-' ~ postgresql_major_upgrade_old_major ~ '/bin'
+     if ansible_facts['os_family'] == 'RedHat'
+     else '/usr/lib/postgresql/' ~ postgresql_major_upgrade_old_major ~ '/bin' }}
+postgresql_major_upgrade_old_data_dir: >-
+  {{ '/var/lib/pgsql/' ~ postgresql_major_upgrade_old_major ~ '/data'
+     if ansible_facts['os_family'] == 'RedHat'
+     else '/var/lib/postgresql/' ~ postgresql_major_upgrade_old_major ~ '/main' }}
+postgresql_major_upgrade_old_service: >-
+  {{ 'postgresql-' ~ postgresql_major_upgrade_old_major
+     if ansible_facts['os_family'] == 'RedHat'
+     else 'postgresql@' ~ postgresql_major_upgrade_old_major ~ '-main' }}
+postgresql_major_upgrade_old_packages: >-
+  {{ ['postgresql' ~ postgresql_major_upgrade_old_major,
+      'postgresql' ~ postgresql_major_upgrade_old_major ~ '-libs',
+      'postgresql' ~ postgresql_major_upgrade_old_major ~ '-server',
+      'postgresql' ~ postgresql_major_upgrade_old_major ~ '-contrib']
+     if ansible_facts['os_family'] == 'RedHat'
+     else ['postgresql-' ~ postgresql_major_upgrade_old_major,
+           'postgresql-client-' ~ postgresql_major_upgrade_old_major] }}
+
+# Any major version installed other than the one asked for, as numbers.
+postgresql_other_major_versions: >-
+  {{ ansible_facts['packages'].keys()
+     | select('match', postgresql_server_package_pattern)
+     | reject('equalto', postgresql_server_package)
+     | map('regex_replace', '^postgresql-?([0-9]+).*$', '\1')
+     | list }}
+
+# PostgreSQL 18 turned data checksums on by default, and pg_upgrade refuses two
+# clusters that differ, so the new one has to say what the old one is.
+postgresql_major_upgrade_checksum_arguments: >-
+  {{ ['--data-checksums']
+     if postgresql_major_upgrade_old_checksums == 'on'
+     else (['--no-data-checksums'] if postgresql_version | int >= 18 else []) }}
+
+# The whole pg_upgrade invocation. Debian keeps its configuration outside the data
+# directory, so there pg_upgrade has to be told where each one is.
+postgresql_major_upgrade_command: >-
+  {{ [postgresql_bin_dir ~ '/pg_upgrade',
+      '--old-bindir=' ~ postgresql_major_upgrade_old_bin_dir,
+      '--new-bindir=' ~ postgresql_bin_dir,
+      '--old-datadir=' ~ postgresql_major_upgrade_old_data_dir,
+      '--new-datadir=' ~ postgresql_data_dir]
+     + (['--old-options=-c config_file=/etc/postgresql/' ~ postgresql_major_upgrade_old_major ~ '/main/postgresql.conf',
+         '--new-options=-c config_file=' ~ postgresql_conf]
+        if ansible_facts['os_family'] == 'Debian' else [])
+     + (['--link'] if postgresql_major_upgrade_mode == 'link' else [])
+     + postgresql_major_upgrade_extra_arguments }}

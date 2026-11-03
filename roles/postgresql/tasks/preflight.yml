@@ -1,0 +1,77 @@
+---
+# Nothing here changes the host.
+
+- name: "ALL | Ensure the operating system is one this role supports"
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] in postgresql_supported_os_families
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}. This
+      role supports the {{ postgresql_supported_os_families | join(' and ') }}
+      families.
+    quiet: true
+
+- name: "ALL | Ensure the postgres superuser password is a real one"
+  ansible.builtin.import_tasks: preflight-password.yml
+
+- name: "ALL | Ensure the pinned release belongs to the requested major version"
+  ansible.builtin.assert:
+    that:
+      - postgresql_package_version is match('^' ~ postgresql_version ~ '\.[0-9]+$')
+    fail_msg: >-
+      postgresql_package_version is '{{ postgresql_package_version }}' and
+      postgresql_version is '{{ postgresql_version }}'. A pin looks like
+      '{{ postgresql_version }}.1': the major version and the minor release,
+      without the package revision.
+    quiet: true
+  when: postgresql_package_version | length > 0
+
+- name: "RHEL | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: rpm
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: "DEBIAN | Collect the versions of the packages installed on this host"
+  ansible.builtin.package_facts:
+    manager: apt
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: "ALL | Check whether this host was already upgraded to the requested major version"
+  ansible.builtin.stat:
+    path: "{{ postgresql_major_upgrade_marker }}"
+  become: true
+  register: postgresql_major_upgrade_marker_state
+
+# postgresql-18 next to postgresql-17 gives a second, empty cluster and leaves
+# the data in the old one, while every run reports success. The old packages
+# are allowed after a major upgrade, until its cleanup removes them.
+- name: "ALL | Ensure this is not a major version upgrade"
+  ansible.builtin.assert:
+    that:
+      - postgresql_other_majors | length == 0 or postgresql_major_upgrade_marker_state.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} has {{ postgresql_other_majors | join(', ') }}
+      installed and postgresql_version asks for {{ postgresql_version }}. Moving
+      data between major versions is what
+      playbooks/postgresql-major-upgrade.yml is for. Otherwise, set
+      postgresql_version back to the version in use.
+    quiet: true
+  vars:
+    postgresql_other_majors: >-
+      {{ ansible_facts['packages'].keys()
+         | select('match', postgresql_server_package_pattern)
+         | reject('equalto', postgresql_server_package)
+         | list }}
+
+- name: "ALL | Ensure the pinned release is not a downgrade"
+  ansible.builtin.assert:
+    that:
+      - postgresql_package_version is version(postgresql_installed_version, '>=')
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ postgresql_installed_version }} and
+      postgresql_package_version asks for {{ postgresql_package_version }}. The
+      role only moves forward. Raise the pin to at least the installed release.
+    quiet: true
+  when:
+    - postgresql_package_version | length > 0
+    - postgresql_installed_version | length > 0

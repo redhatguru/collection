@@ -1,0 +1,19 @@
+{#
+  Booleans become on/off, and everything else is quoted, which PostgreSQL
+  accepts for numbers too.
+-#}
+{%- macro pg(value) -%}
+{%- if value is boolean -%}
+{{ 'on' if value else 'off' }}
+{%- else -%}
+'{{ value | string | replace("'", "''") }}'
+{%- endif -%}
+{%- endmacro -%}
+# Managed by redhatguru.general.postgresql — local edits are overwritten.
+
+listen_addresses = {{ pg(postgresql_listen_addresses) }}
+port = {{ pg(postgresql_port) }}
+password_encryption = {{ pg(postgresql_password_encryption) }}
+{% for key, value in postgresql_settings | dictsort %}
+{{ key }} = {{ pg(value) }}
+{% endfor %}

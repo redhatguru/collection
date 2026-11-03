@@ -1,0 +1,9 @@
+---
+- name: "ALL | Print the server report"
+  ansible.builtin.debug:
+    msg:
+      - "Installed release   : {{ postgresql_installed_version | default('unknown', true) }}"
+      - "Pinned release      : {{ postgresql_package_version | default('none, stays on what is installed', true) }}"
+      - "Packages held       : {{ 'yes' if postgresql_package_hold | bool else 'no' }}"
+      - "Port                : {{ postgresql_port }}"
+      - "Network access from : {{ postgresql_hba_entries | map(attribute='address') | join(', ') }}"

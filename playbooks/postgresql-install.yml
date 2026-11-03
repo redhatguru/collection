@@ -1,0 +1,24 @@
+---
+# Installs PostgreSQL on the hosts in the postgresql group at the pinned release
+# and configures the server. Creates no databases: that is
+# playbooks/postgresql-databases.yml.
+#
+#   ansible-playbook -i inventories/lab-postgresql/hosts.yml playbooks/postgresql-install.yml
+#
+# This is also the update: raise postgresql_package_version and run it again.
+# serial: 1 means a release that breaks stops the run at the first host.
+#
+# Variables come from inventory, see
+# inventories/lab-postgresql/group_vars/postgresql.yml. become is set per task
+# inside the role.
+- name: Install and configure PostgreSQL
+  hosts: postgresql
+  serial: 1
+  gather_facts: true
+
+  tasks:
+    # Imported so that --tags reaches the tasks inside it.
+    - name: "ALL | Ensure PostgreSQL is installed and configured"
+      ansible.builtin.import_role:
+        name: redhatguru.general.postgresql
+        tasks_from: server.yml
